@@ -1,0 +1,52 @@
+-Q vendor/pts-dependent-types/theories DepTypes
+-Q theories IndTypes
+-docroot IndTypes
+
+# The kernel: the modules of the pinned pts-dependent-types that the
+# lecture builds on, System U for the observations the kernel's printer
+# prints, and the hand-written signatures of MLTT/Constants.v and
+# MLTT/Families.v, which the classification and the generator must
+# reproduce (its PCF translation and the strictness-pcf dependency are not
+# built).
+vendor/pts-dependent-types/theories/Common/Result.v
+vendor/pts-dependent-types/theories/Common/Traced.v
+vendor/pts-dependent-types/theories/PTS/Syntax.v
+vendor/pts-dependent-types/theories/PTS/Named.v
+vendor/pts-dependent-types/theories/PTS/Spec.v
+vendor/pts-dependent-types/theories/PTS/Signature.v
+vendor/pts-dependent-types/theories/PTS/Reduction.v
+vendor/pts-dependent-types/theories/PTS/SubstLaws.v
+vendor/pts-dependent-types/theories/PTS/NormalOrder.v
+vendor/pts-dependent-types/theories/PTS/Eval.v
+vendor/pts-dependent-types/theories/PTS/Typing.v
+vendor/pts-dependent-types/theories/PTS/Bidir.v
+vendor/pts-dependent-types/theories/PTS/Check.v
+vendor/pts-dependent-types/theories/PTS/CheckSound.v
+vendor/pts-dependent-types/theories/Configs/Finite.v
+vendor/pts-dependent-types/theories/Configs/Predicative.v
+vendor/pts-dependent-types/theories/SystemU/Looping.v
+vendor/pts-dependent-types/theories/SystemU/Encodings.v
+vendor/pts-dependent-types/theories/PTS/EmptySig.v
+vendor/pts-dependent-types/theories/MLTT/Choose.v
+vendor/pts-dependent-types/theories/MLTT/Constants.v
+vendor/pts-dependent-types/theories/MLTT/Families.v
+
+theories/Elim/Decl.v
+theories/Elim/Generate.v
+theories/Elim/Declare.v
+theories/Recursion/Below.v
+theories/Recursion/CaseTree.v
+theories/Recursion/Compile.v
+theories/Data/Sigma.v
+theories/Data/Primitives.v
+theories/Data/Nat.v
+theories/Data/Lists.v
+theories/Data/Tree.v
+theories/Data/Positivity.v
+theories/Data/W.v
+theories/Programs/Direct.v
+theories/Programs/Half.v
+theories/Programs/Append.v
+theories/Programs/Rejected.v
+theories/Contracts.v
+theories/Tests.v

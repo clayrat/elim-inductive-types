@@ -1,0 +1,4 @@
+[submodule "vendor/pts-dependent-types"]
+	path = vendor/pts-dependent-types
+	url = git@github.com:clayrat/pts-dependent-types.git
+	branch = inductive-types
