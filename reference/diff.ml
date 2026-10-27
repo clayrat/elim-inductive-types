@@ -14,7 +14,8 @@ module Da = Data
 
 open Extracted
 
-(* ** Conversions of algorithm 1 *)
+(* ** Conversions of algorithm 1, and of the diagnostics it shares with
+   algorithm 2 *)
 
 let raw_to_extracted raw = {
   X.rd_name = raw.En.rd_name;
@@ -60,6 +61,30 @@ let stage_to_extracted = function
   | En.AtRuleRhs (d, j, c) -> X.AtRuleRhs (d, j, c)
   | En.AtDefType f -> X.AtDefType f
   | En.AtDefBody f -> X.AtDefBody f
+  | En.AtMotive (f, x) -> X.AtMotive (f, x)
+  | En.AtEquation (f, i) -> X.AtEquation (f, i)
+
+module Dn = Diagnostics_native
+
+let case_error_to_extracted = function
+  | Dn.CDuplicateArg x -> X.CDuplicateArg x
+  | Dn.CNoStruct x -> X.CNoStruct x
+  | Dn.CUnbound x -> X.CUnbound x
+  | Dn.CNotFamily (x, t) -> X.CNotFamily (x, term_to_extracted t)
+  | Dn.CIndices (x, t) -> X.CIndices (x, term_to_extracted t)
+  | Dn.CGeneralize (x, y) -> X.CGeneralize (x, y)
+  | Dn.CParams (x, y) -> X.CParams (x, y)
+  | Dn.CBranches x -> X.CBranches x
+  | Dn.CFields (c, n) -> X.CFields (c, n)
+  | Dn.CFieldName (c, x) -> X.CFieldName (c, x)
+  | Dn.CRoot x -> X.CRoot x
+  | Dn.CUnsplit x -> X.CUnsplit x
+  | Dn.CMotiveSort (x, s) -> X.CMotiveSort (x, sort_to_extracted s)
+  | Dn.CCallArity t -> X.CCallArity (term_to_extracted t)
+  | Dn.CNotStructural t -> X.CNotStructural (term_to_extracted t)
+  | Dn.CNotImmediate t -> X.CNotImmediate (term_to_extracted t)
+  | Dn.CIndexChanged (x, t) -> X.CIndexChanged (x, term_to_extracted t)
+  | Dn.CConstantChanged (x, t) -> X.CConstantChanged (x, term_to_extracted t)
 
 let reg_error_to_extracted = function
   | En.RClassify e -> X.RClassify (decl_error_to_extracted e)
@@ -69,6 +94,8 @@ let reg_error_to_extracted = function
   | En.RNotAType (st, t) -> X.RNotAType (stage_to_extracted st, term_to_extracted t)
   | En.RRejected (st, e) -> X.RRejected (stage_to_extracted st, error_to_extracted e)
   | En.ROpen -> X.ROpen
+  | En.RCase e -> X.RCase (case_error_to_extracted e)
+  | En.REquation (f, i, l, r) -> X.REquation (f, i, term_to_extracted l, term_to_extracted r)
 
 let failure_to_extracted = function
   | En.Refuse e -> X.Refuse (reg_error_to_extracted e)

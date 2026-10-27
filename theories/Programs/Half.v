@@ -27,7 +27,7 @@ From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import Nat.
-From IndTypes.Recursion Require Import CaseTree Compile.
+From IndTypes.Recursion Require Import Below CaseTree Compile.
 From IndTypes.Programs Require Import Direct.
 Open Scope string_scope.
 Open Scope nterm_scope.
@@ -130,4 +130,10 @@ Example even_computes :
 Proof. repeat split; vm_compute; reflexivity. Qed.
 
 (** The primitive [Unit : Type₀] does not stand for [Unit_1] in the empty
-    history: Tests.history_needs_unit_1. *)
+    history: the history of [isEven] written with it is refused in the
+    method of [zero] (Tests.history_needs_unit_1). *)
+Definition unit_history_run : list (stage * list event) * registration :=
+  run_registration (
+    let! sg := ensure_elim predicative prog_fuel sg_nat0 "Nat" 2 in
+    define predicative prog_fuel sg "Below_Nat_1" (below_type nat_desc 1)
+      (build [] (λ "P", NConst (Elim "Nat" 2) (λ "_", Type@ 1) NUnit (λ "n", λ "ih", "P" "n" ⨯ "ih")))).

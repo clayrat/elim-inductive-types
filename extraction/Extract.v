@@ -2,8 +2,10 @@
 
     Exports the kernel's checker and evaluator, algorithm 1 (the
     classification of declarations, the generator of eliminators and the
-    registration of declarations, instances and δ-constants) and the
-    declarations of the lecture (Data/) into generated/deptypes.ml.  The extract keeps
+    registration of declarations, instances and δ-constants), algorithm 2
+    (the history, the compiler of case trees and the names of the scopes
+    of its equations), the declarations of the lecture (Data/) and its
+    programs (Programs/) into generated/deptypes.ml.  The extract keeps
     the kernel's module name, so the kernel's printer (extraction/pretty.ml
     of the submodule, which make copies next to it) compiles against it
     unchanged; [observe] is extracted only for the observations it prints.
@@ -17,6 +19,8 @@ From DepTypes.SystemU Require Import Encodings.
 From DepTypes.MLTT Require Import Constants Families.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Data Require Import Nat Lists Tree W Primitives Positivity.
+From IndTypes.Recursion Require Import Below CaseTree Compile.
+From IndTypes.Programs Require Import Direct Half Append Rejected Copy.
 
 Extraction Language OCaml.
 Set Extraction Output Directory "generated".
@@ -45,6 +49,13 @@ Extraction "deptypes.ml"
   declare declare_with declare_elim ensure_elim check_rule define declare_checked declare_bypassing define_checked run_registration
   registered refusal ensure_unit unit_at tt_at unit_name
   nat_desc elim_nat_ty double_body vec_desc w_desc
-  raw_nat sg_nat0 raw_list list_desc raw_vec raw_tree tree_desc raw_w
+  raw_nat sg_nat0 raw_list list_desc raw_vec raw_tree tree_desc raw_w ind_w_run ind_false_run
   raw_void raw_unit raw_bool void_desc unit_desc bool_desc to_prim void_schema unit_schema bool_schema
-  raw_negative raw_negative_bool raw_non_strict void_diagonal bool_diagonal sg_void sg_bool.
+  raw_negative raw_negative_bool raw_non_strict void_diagonal bool_diagonal sg_void sg_bool
+  ensure_below below_name build_name recbelow_name
+  compile_checked compile_all named_equations
+  prog_fuel num plus_fn pow_fn f_fn direct_run sg_direct
+  half_fn even_fn half_run even_run sg_half sg_even unit_history_run
+  append_fn plus2_fn sumv_fn sg_vec append_run sg_append
+  pred_fn g_fn ack_fn len_fn sg_list iter_fn ack_ho_fn sg_ack
+  copy_fn copy_run sg_copy.

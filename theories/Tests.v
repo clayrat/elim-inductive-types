@@ -20,7 +20,9 @@
     of types in [Type₁], [Below_D], [build_D] and [recBelow_D] register
     with what they need, and compute to the formulas of the lecture on
     open terms; the history of a motive in [Type₁] is refused with the
-    primitive [Unit : Type₀] in place of [Unit_1].
+    primitive [Unit : Type₀] in place of [Unit_1], and [shadow], a family
+    indexed by a [Below_D_0] defined by hand, whose history at 0 would
+    shadow it and is refused, its name taken.
 
     Case trees: elaborated, the leaves of [half], [append] and of
     splits of vectors, W-types, binary trees and [Tr] have the names,
@@ -35,7 +37,16 @@
     Programs/; here the diagnostics of calls: a root that is no split of
     the structural argument, a leaf reached without a split of it, the
     function not applied to all its arguments, a constant argument or an
-    index changed in a call.  And the
+    index changed in a call; the leaves of [half] and [append] check
+    against their goals with the function not computing, as
+    [Contracts.compilation_registrable] assumes, and that of [nil] with
+    addition on the second argument does not.  Two trees show why the
+    premises are what they are: [beta], whose right side [(λx. x) zero]
+    is typed declaratively and refused by the checker whatever the fuel,
+    and [peek], whose right side checks only through the computation of
+    its own call, which the hypothesis replacing the call does not
+    have; and [clash], named as the recursor of its own history, whose
+    equations fail once the function shadows it.  And the
     splits of the primitive types: of a constant [b : Bool], which
     generalizes the constant [c : IsTrue b], so that in the branch
     [false] [c] is a proof of Void; of Void and of Unit; a primitive
@@ -53,7 +64,8 @@ From DepTypes.MLTT Require Import Constants Families.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Data Require Import Nat Lists Tree W.
 From IndTypes.Recursion Require Import Below CaseTree Compile.
-From IndTypes.Programs Require Direct Append.
+From IndTypes.Programs Require Direct Append Half.
+From IndTypes Require Contracts.
 
 Open Scope string_scope.
 Open Scope nterm_scope.
@@ -346,15 +358,52 @@ Proof. split; vm_compute; reflexivity. Qed.
 (** Without cumulativity the empty history of a motive in [Type₁] cannot
     be the primitive [Unit : Type₀]: the method of [zero] is refused. *)
 Example history_needs_unit_1 :
-  match refusal (run_registration (
-    let! sg := ensure_elim predicative fuel sg_nat0 "Nat" 2 in
-    define predicative fuel sg "Below_Nat_1" (below_type nat_desc 1)
-      (build [] (λ "P", NConst (Elim "Nat" 2) (λ "_", Type@ 1) NUnit (λ "n", λ "ih", "P" "n" ⨯ "ih")))))
-  with
+  match refusal Half.unit_history_run with
   | Some (RRejected (AtDefBody "Below_Nat_1") (EMismatch Unit _ _)) => True
   | _ => False
   end.
 Proof. vm_compute. trivial. Qed.
+
+(** The names of the history are free, as [Contracts.history_typed]
+    assumes: with [Below_D_0 : Type₀ := Unit] defined by hand and a family
+    D indexed by it, with its instances at 0 and 1, the history at 0 is
+    ready, but the generated [Below_D_0] added shadows the type: the
+    domain of the index becomes a function, and the type of [build_D_0]
+    is no type.  [ensure_below] refuses the name, taken. *)
+Definition D : nterm := NConst (Ind "D").
+
+Definition raw_d : raw_decl := {|
+  rd_name := "D"; rd_params := []; rd_indices := [build [] (H "Below_D_0")]; rd_level := 0;
+  rd_ctors := [mk_raw_ctor "mk" (build [] (Π "n" : H "Below_D_0", D "n"))] |}.
+
+Definition sg_shadow : signature :=
+  match registered (run_registration (
+    let! s1 := define predicative fuel ∅ "Below_D_0" (Srt (Univ 0)) Unit in
+    declare predicative fuel s1 raw_d [0; 1]))
+  with Some sg => sg | None => ∅ end.
+
+(** The type of [build_D_0] with the generated [Below_D_0] added. *)
+Definition shadowed_build : option (answer term) :=
+  match sig_ind sg_shadow "D" with
+  | Some d =>
+      match sig_add sg_shadow (EDef (below_name "D" 0) (below_type d 0) (below_body d 0)) with
+      | Some sg4 => Some (snd (run_infer predicative sg4 fuel [] (build_type d 0)))
+      | None => None
+      end
+  | None => None
+  end.
+
+Example shadow :
+  match sig_def sg_shadow "Below_D_0", sig_elim sg_shadow "D" 0, sig_elim sg_shadow "D" 1 with
+  | Some (Srt (Univ 0), Unit), Some (_, true), Some (_, true) => True
+  | _, _, _ => False
+  end /\
+  match shadowed_build with
+  | Some (Rejected (ENotASort (Const (Def "Below_D_0")) _)) => True
+  | _ => False
+  end /\
+  refusal (run_registration (ensure_below predicative fuel sg_shadow "D" 0)) = Some (RTaken (Def "Below_D_0")).
+Proof. split; [ | split]; vm_compute; [trivial | trivial | reflexivity]. Qed.
 
 (** ** Case trees *)
 
@@ -589,6 +638,125 @@ Example call_errors :
   | _, _, _ => False
   end.
 Proof. split; vm_compute; trivial. Qed.
+
+(** The premise of [Contracts.compilation_registrable], [leaves_checked],
+    with the checker: every leaf checks against its goal in the signature
+    where the function has the body [body b], [b] the compiled one.  The
+    premise asks for every body; [itself] is the one under which the
+    function does not compute. *)
+Definition leaves_check (sg_in : signature) (fn : fun_decl) (body : term -> term) : option (list bool) :=
+  match snd (run_traced (compile_with predicative Direct.prog_fuel Contracts.leaves sg_in fn)) with
+  | Ok (sg0, A, b, ls) =>
+      match sig_add sg0 (EDef (fn_name fn) A (body b)) with
+      | Some sgf =>
+          Some (map (fun '(G, goal, rhs) =>
+                  match snd (run_check predicative sgf Direct.prog_fuel (map b_type G) rhs goal) with
+                  | Accepted _ => true
+                  | _ => false
+                  end) ls)
+      | None => None
+      end
+  | Err _ => None
+  end.
+
+Definition itself (fn : fun_decl) (_ : term) : term := Const (Def (fn_name fn)).
+
+Definition sg_plus2 : signature := Direct.sg_of (compile_all predicative Direct.prog_fuel Append.sg_vec [Append.plus2_fn]).
+
+(** Every leaf of [half] and [append] checks against its goal, the
+    function not computing; with addition on the second argument the leaf
+    of [nil] does not, which the check of the body then refuses. *)
+Example leaves_typed_on_programs :
+  leaves_check sg_nat0 (Half.half_fn History) (itself (Half.half_fn History)) = Some [true; true; true] /\
+  leaves_check Append.sg_vec (Append.append_fn "append" Direct.plus)
+    (itself (Append.append_fn "append" Direct.plus)) = Some [true; true] /\
+  option_map (firstn 1) (leaves_check sg_plus2 (Append.append_fn "append2" Append.plus2)
+                           (itself (Append.append_fn "append2" Append.plus2))) = Some [false].
+Proof. split; [ | split]; vm_compute; reflexivity. Qed.
+
+(** [beta zero = (λx. x) zero], [beta (succ k) = zero]: the declarative
+    rules type the first right side, the checker cannot infer the λ at the
+    head of the application.  The translation accepts the tree, and the
+    check of the body refuses it with [ECannotInfer], a rejection, not a
+    lack of fuel: declarative premises do not give
+    [Contracts.compilation_registrable]. *)
+Definition beta_fn : fun_decl := {|
+  fn_name := "beta"; fn_args := [("n", Nat, Constant)]; fn_result := Nat;
+  fn_struct := "n"; fn_strategy := Direct;
+  fn_tree := Split "n" [("zero", [], Leaf ((λ "x", "x") zero)); ("succ", ["k"], Leaf zero)] |}.
+
+Example beta_refused :
+  leaves_check sg_nat0 beta_fn (fun b => b) = Some [false; true] /\
+  refusal (compile_checked predicative Direct.prog_fuel sg_nat0 beta_fn) =
+    Some (RRejected (AtDefBody "beta") (ECannotInfer (Lam (Var 0)))) /\
+  refusal (compile_checked predicative (10 * Direct.prog_fuel) sg_nat0 beta_fn) =
+    Some (RRejected (AtDefBody "beta") (ECannotInfer (Lam (Var 0)))).
+Proof. split; [ | split]; vm_compute; reflexivity. Qed.
+
+(** [peek Q w (succ k)] relies on the computation of its own call:
+    [w X : Q X] is passed where [Q (peek Q w k)] is expected, with [X] the
+    normal form of the call under the compiled body.  The leaf checks
+    with that body, not with another one, such as [λQ w n. zero]; and in
+    the compiled body the hypothesis, which does not compute, stands for
+    the call, so the body is refused with [Q X] against [Q ih].  The
+    premises of [Contracts.translation_typed] are therefore for every
+    body. *)
+Definition peek : nterm := NConst (Def "peek").
+Definition peek_x : nterm := NConst (Elim "Nat" 0) (λ "_", Nat) zero (λ "_", λ "_", zero) "k".
+Definition peek_fn : fun_decl := {|
+  fn_name := "peek";
+  fn_args := [("Q", Nat ~> Type@ 0, Constant); ("w", Π "m" : Nat, "Q" "m", Constant); ("n", Nat, Constant)];
+  fn_result := Nat; fn_struct := "n"; fn_strategy := Direct;
+  fn_tree := Split "n" [("zero", [], Leaf zero);
+                        ("succ", ["k"], Leaf (((λ "v", zero) ∷ ("Q" (peek "Q" "w" "k") ~> Nat)) ("w" peek_x)))] |}.
+
+Example peek_refused :
+  leaves_check sg_nat0 peek_fn (fun b => b) = Some [true; true] /\
+  leaves_check sg_nat0 peek_fn (fun _ => build [] (λ "Q", λ "w", λ "n", zero)) = Some [true; false] /\
+  match refusal (compile_checked predicative Direct.prog_fuel sg_nat0 peek_fn) with
+  | Some (RRejected (AtDefBody "peek") (EMismatch _ (App (Var 4) (Var 0)) _)) => True
+  | _ => False
+  end.
+Proof. split; [ | split]; vm_compute; [reflexivity | reflexivity | trivial]. Qed.
+
+(** A function named as the recursor its own history registers,
+    [recBelow_Nat_0 zero = zero] and [recBelow_Nat_0 (succ k) = zero] by
+    [History].  The translation accepts it: in [sg0] the name is the
+    recursor, and the body [λn. recBelow_Nat_0 (λ_. ℕ) step n] calls it.
+    With the function added the name is the function, and the left side
+    of the equation of [zero] unfolds through itself, every δ and β adding
+    two arguments, never reaching [zero].  [compile] refuses the name,
+    taken; [Contracts.equations_definitional] assumes it free. *)
+Definition clash_fn : fun_decl := {|
+  fn_name := "recBelow_Nat_0"; fn_args := [("n", Nat, Constant)]; fn_result := Nat;
+  fn_struct := "n"; fn_strategy := History;
+  fn_tree := Split "n" [("zero", [], Leaf zero); ("succ", ["k"], Leaf zero)] |}.
+
+Definition head_steps (sg : signature) (n : nat) (t : term) : term :=
+  Nat.iter n (fun t => match head_step sg t with Some u => u | None => t end) t.
+
+(** The type of the name in [sg0], and the head and the number of
+    arguments of the left side after 0, 2, 4 and 6 head steps with the
+    function added. *)
+Definition clash_unfolding : option (option term * list (term * nat)) :=
+  match snd (run_traced (compile_term predicative Direct.prog_fuel sg_nat0 clash_fn)) with
+  | Ok (sg0, A, b, (lhs, _) :: _) =>
+      match sig_add sg0 (EDef (fn_name clash_fn) A b) with
+      | Some sgf =>
+          Some (option_map fst (sig_def sg0 (fn_name clash_fn)),
+                map (fun k => let u := head_steps sgf (2 * k) lhs in (spine_head u, length (spine_args u)))
+                  [0; 1; 2; 3])
+      | None => None
+      end
+  | _ => None
+  end.
+
+Example clash_refused :
+  clash_unfolding =
+    Some (Some (recbelow_type nat_desc 0),
+          map (fun n => (Const (Def "recBelow_Nat_0"), n)) [1; 3; 5; 7]) /\
+  refusal (compile_checked predicative Direct.prog_fuel sg_nat0 clash_fn) = Some (RTaken (Def "recBelow_Nat_0")).
+Proof. split; vm_compute; reflexivity. Qed.
 
 (** ** Splits of the primitive types *)
 

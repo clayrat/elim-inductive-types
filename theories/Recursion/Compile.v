@@ -310,9 +310,10 @@ Section Compile.
     end.
 
   (** The translation: the signature with the history and the instances
-      it needs, the type of the function, its body, and its equations. *)
-  Definition compile_term (sg : signature) (fn : fun_decl)
-    : R (signature * term * term * list (term * term)) :=
+      it needs, the type of the function, its body, and what [out] reads
+      off the elaborated tree. *)
+  Definition compile_with {X} (out : elab -> X) (sg : signature) (fn : fun_decl)
+    : R (signature * term * term * X) :=
     let f := fn_name fn in
     let x := fn_struct fn in
     let! s0 := case (start fn) in
@@ -359,7 +360,12 @@ Section Compile.
     let '(sg1, root, needed, e) := r in
     let! _ := if splits_struct e then tret tt else refuse (RCase (CUnsplit x)) in
     let! sg2 := tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D k) sg1 needed in
-    tret (sg2, pis (map b_type (rev G0)) goal0, lams N root, equations f e).
+    tret (sg2, pis (map b_type (rev G0)) goal0, lams N root, out e).
+
+  (** With the equations of the tree. *)
+  Definition compile_term (sg : signature) (fn : fun_decl)
+    : R (signature * term * term * list (term * term)) :=
+    compile_with (equations (fn_name fn)) sg fn.
 
   (** The function, registered as a δ-constant, and its equations checked. *)
   Definition compile (sg : signature) (fn : fun_decl) : R signature :=
@@ -378,6 +384,35 @@ Definition compile_checked (S : spec) (fuel : nat) (sg : signature) (fn : fun_de
 Definition compile_all (S : spec) (fuel : nat) (sg : signature) (fns : list fun_decl)
   : list (stage * list event) * registration :=
   run_registration (tfold (compile S fuel) sg fns).
+
+(** ** The names of the equations, for printing
+
+    The scope of every leaf, in the order of [equations]: an argument or
+    a pattern variable by its name, the table and the hypotheses by their
+    role. *)
+Definition binder_label (b : binder) : string :=
+  match b_tag b with
+  | User x _ => x
+  | Aux 0 => "table"
+  | Aux _ => "ih"
+  | Anon => "_"
+  end.
+
+Fixpoint leaf_names (e : elab) : list (list string) :=
+  match e with
+  | ELeaf G _ _ _ => [map binder_label G]
+  | ESplit _ _ _ brs => flat_map (fun '(_, e') => leaf_names e') brs
+  end.
+
+(** The equations of the tree with the names of their scopes, read off
+    one run of the translation: in the signature the function was
+    compiled in, or in one that extends it. *)
+Definition named_equations (S : spec) (fuel : nat) (sg : signature) (fn : fun_decl)
+  : option (list (list string * (term * term))) :=
+  match snd (run_traced (compile_with S fuel (fun e => combine (leaf_names e) (equations (fn_name fn) e)) sg fn)) with
+  | Ok (_, _, _, nes) => Some nes
+  | Err _ => None
+  end.
 
 (** ** What a compilation guarantees
 
@@ -418,7 +453,7 @@ Section Sound.
     compile_term Sp fuel sg fn log = (log', Ok (sg0, A, b, eqs)) ->
     exists es, sig_entries sg0 = es ++ sig_entries sg.
   Proof.
-    intros sg fn log log' sg0 A b eqs H. unfold compile_term in H.
+    intros sg fn log log' sg0 A b eqs H. unfold compile_term, compile_with in H.
     tbind_in H s0 Hs. destruct s0 as [[G0 goal0] env0].
     tbind_in H si Hp.
     tbind_in H w Hw.

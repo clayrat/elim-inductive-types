@@ -68,6 +68,7 @@ repository hold their plan only.
 |---|---|
 | kernel built from the submodule; extraction with the kernel's printer | linked, smoke-tested |
 | extraction and demos of algorithm 1 | `make demo` shows, in the order of the lecture, the descriptions, generated eliminators, methods and ι-rules of ℕ, lists, vectors, binary trees and W, the registration logs by stage with one ι-rule traced, the two refused declarations, `δ (mk δ) : Void` and the `Undecided` Bool diagonal in the bypass mode, Void/Unit/Bool against the primitives, `Unit_1` without cumulativity, and `double` under normal order; `make test` checks these outputs |
+| extraction and demos of algorithm 2 | `make demo` goes on with the programs: each with its type, strategy, body and equations, its pattern variables named; the equations by conversion, as the redexes of the normal-order trace of each side, δ with the name of the constant (in full, with the terms, for `pow` and `f`); the history of ℕ (`Below`, `build`, `recBelow`) and of vectors; `half` refused directly and compiled through the history; `isEven` with `Unit_1`, `elimNat[2]` and `elimNat[1]`, `tt : isEven 4`, and the history with `Unit : Type₀` refused; `append`, the branch `nil` refused with addition on the second argument, in the names of its scope; the motive of `sumv`; the refusals of `g (pred n)`, Ackermann's equations and `len`, and Ackermann's function of higher order. Then W-types: `copy` in both strategies, `copy zero_W ≢ zero_W`, and the refused transfer of induction to ℕ_W with the trace of its body from the match on the label. `make test` checks these outputs, and that every step of these traces is a redex the printer names |
 | Σ, constants, signature, δ, ι by scheme, extended soundness (in the kernel) | done on the kernel's branch `inductive-types` (`821b16b`); tested in its `MLTT/Pairs.v`, `MLTT/Constants.v` and `MLTT/Families.v` |
 | Σ and constants in the kernel's native reference | done on the same branch; compared with the extract by the kernel's differential test |
 | native algorithm 1 | `reference/elim_native.ml`: classification, generation and registration on the kernel's native reference; compared with the extract on classification answers, generated types and rules, and complete registration logs, over the lecture's declarations, every diagnostic, five specifications, fuel from 0 up, and 2778 enumerated constructors; `make test` runs it |
@@ -77,9 +78,10 @@ repository hold their plan only.
 | `Below_D`, `build_D`, `recBelow_D` and `Unit_ℓ` | implemented in `Recursion/Below.v`: from a classified description and the level j of the motive, at the history level ℓ = max(i, j), the three δ-constants per pair (D, j), registered with `Unit_ℓ`, `elim_D[ℓ+1]` and `elim_D[ℓ]` by `ensure_below`; soundness proved from that of `define`. On open terms they compute to the formulas of the lecture for ℕ (at levels 0 and 1), `Vec`, binary trees, `W`, `Tr` and a family in `Type₁`; the primitive `Unit` in place of `Unit_1` is refused |
 | case trees | implemented in `Recursion/CaseTree.v`: annotated functions with named case trees, and their elaboration into scopes and goals. A split of `z : D Δ θ̄`, or of a variable of the primitive Void, Unit or Bool, generalizes the indices, `z` and the dependent tail of the scope, and binds in each branch the fields with their hypotheses and the tail again, refined (splitting a constant `b : Bool` refines a constant `c : IsTrue b`); the values of the arguments (the left sides of the equations) and the paths of pattern variables follow. On `half`, `append`, a hypothesis on the length of a vector, W, binary trees and `Tr` every scope is a context the checker accepts and every right side without recursion checks against its goal; every diagnostic arises |
 | `compile_checked` | implemented in `Recursion/Compile.v`: the motive of the recursion with Γ_P, through the history (`recBelow_D` with a step over the history) or directly (the root split by `elim_D[j]`, calls becoming hypotheses); every split by the instance at exactly the level of its motive, found by the checker, a split of Void, Unit or Bool by its primitive eliminator; every leaf reached through a split of the structural argument, so that its equation can hold by definition; calls replaced by accesses to the history, with the check of structural decrease; the output registered as a δ-constant checked without itself, and every defining equation checked by conversion. Soundness proved from that of `define` and of the conversion check |
-| ℕ, lists, vectors, binary trees, W, ℕ_W; Void/Unit/Bool against the primitives | in `Data/`; ℕ_W as the δ-constants `IsTrue`, `Nat_W`, `zero_W`, `succ_W` over W in `Data/W.v`, with the positions `IsTrue false ≡ Void` and `IsTrue true ≡ Unit`; its computation and the rejected transfer of induction remain (stage 4) |
-| lecture programs and rejections | in `Programs/`: `+`, `pow` and `f` directly, their bodies the terms written by hand; `half` (with `half k` as `fst (snd t)`) and `isEven` (with `Unit_1`, `elimNat[2]`, `elimNat[1]`) through the history, `tt : isEven 4` accepted; `append` and `sumv`, whose hypothesis on the length enters the motive; refused: `half` without the history, the branch `nil` with addition on the second argument, `g (pred n)`, Ackermann's equations for either argument, a varying parameter, a changed parameter; Ackermann's function by higher-order structural recursion compiled |
-| contracts, demonstrations, native reference and differential tests | planned |
+| ℕ, lists, vectors, binary trees, W, ℕ_W; Void/Unit/Bool against the primitives | in `Data/`; ℕ_W as the δ-constants `IsTrue`, `Nat_W`, `zero_W`, `succ_W` over W in `Data/W.v`, with the positions `IsTrue false ≡ Void` and `IsTrue true ≡ Unit`, and one step of `elim_W[0]` on `succ_W n` (δ, β, ι to the head form; the ι-reduct checks only after one more β); the recursor `rec_W` with a constant motive, its equations on open `n` and computations on canonical terms; the transfer of dependent induction `ind_W`, refused by conversion in the branch `true` (`P (succ_W (f tt))` against `P (sup true f)`), the branch `false` refused on its own, and the conversions η for Π and Unit would supply, but not in the branch of zero |
+| lecture programs and rejections | in `Programs/`: `+`, `pow` and `f` directly, their bodies the terms written by hand; `half` (with `half k` as `fst (snd t)`) and `isEven` (with `Unit_1`, `elimNat[2]`, `elimNat[1]`) through the history, `tt : isEven 4` accepted; `append` and `sumv`, whose hypothesis on the length enters the motive; refused: `half` without the history, the branch `nil` with addition on the second argument, `g (pred n)`, Ackermann's equations for either argument, a varying parameter, a changed parameter; Ackermann's function by higher-order structural recursion compiled; `copy` on W in both strategies, its call on the functional field `f b` as `h b` or `fst (t b)`, the identity only extensionally (`copy zero_W ≢ zero_W`, its child stuck on `elimVoid _ b`) |
+| contracts | `Contracts.v`: 7 proved, axiom-free; open obligations stated for algorithm 1 and for algorithm 2 (the instances and the history typed declaratively and in the annotated kernel, and registrable, for every declaration and level whose names are free; for every tree the translation accepts, the body typed when the right sides have their goals and checked when they check, whatever the body of the function, the equations by definition, the checks passing with enough fuel when the right sides check; compiled functions total). Registrability rests on the annotated kernel, whose checker is complete, not on declarative typing. `Tests.v` checks the premise on the right sides of `half` and `append`, its failure on the branch `nil` of `append2`, and three trees against weaker premises: `beta`, typed declaratively and refused by the checker whatever the fuel, `peek`, typed only through the computation of its own call, and `clash`, named as the recursor of its own history, which the translation accepts and whose equations fail once the function shadows it; and `shadow`, a family indexed by a `Below_D_0` defined by hand, which its generated history would shadow, refused with the name taken |
+| native algorithm 2 | `reference/recursion_native.ml`: the history, the elaboration of case trees and the compiler on the native algorithm 1, with the diagnostics of both in `reference/diagnostics_native.ml`; compared with the extract on the history of every description at three levels and its registration, whole elaborated trees with every diagnostic, translations, and complete compilation logs, over the lecture's programs and refusals, five specifications, fuel from 0 up, and 644 programs enumerated across the grammar of case trees; `make test` runs it |
 
 ## Building
 
@@ -104,10 +106,13 @@ translation and its strictness-pcf dependency are not required.
 `extraction/Extract.v` writes `extraction/generated/deptypes.ml`, and make
 copies the kernel's `pretty.ml` next to it; both are rebuilt and never
 edited by hand. The extract keeps the kernel's module name `Deptypes`, so the
-printer compiles against it unchanged. `pretty_ind.ml` prints what algorithm
-1 adds: descriptions, eliminator types with the motive named P, ι-rules with
-the methods named after their constructors, and the diagnostics, stages and
-answers of classification and registration. `main.ml` runs the
+printer compiles against it unchanged. `pretty_ind.ml` prints what
+algorithms 1 and 2 add: descriptions, eliminator types with the motive named
+P, ι-rules with the methods named after their constructors, the diagnostics,
+stages and answers of classification, registration and compilation, the
+equations of compiled functions with the names of their scopes
+(`named_equations` of `Compile.v` reads both off one run of the translation), and
+the redex each step of a normal-order trace contracts. `main.ml` runs the
 demonstrations and `regress.ml` the tests.
 
 ## Stages
@@ -126,7 +131,12 @@ demonstrations and `regress.ml` the tests.
    `half`, `isEven`, `append` and the rejections. Done: the history, the
    elaboration of case trees, `compile_checked` and the programs.
 4. W-types: the declaration, ℕ_W, the rejected transfer of induction.
+   Done: the declaration and its history, ℕ_W as δ-constants, one step of
+   the eliminator, the recursor, the refused transfer with its trace, and
+   `copy` compiled in both strategies.
 5. Contracts, demonstrations, native reference and differential tests.
+   Done: the extraction and demos of algorithm 2, its open obligations, and
+   its native version with the differential test.
 
 ## Files
 
@@ -150,9 +160,10 @@ demonstrations and `regress.ml` the tests.
 | `Programs/Half.v` | `half` and `isEven` through the history; `Unit_1` against `Unit : Type₀`. |
 | `Programs/Append.v` | `append`; the branch `nil` rejected with addition on the second argument; generalization in a dependent split of a vector. |
 | `Programs/Rejected.v` | `g (succ n) = g (pred n)`, Ackermann's function, non-uniform recursion. |
-| `Contracts.v` | The guarantees of the lecture: proved (classification faithful and strictly positive; registrations of declarations, instances, δ-constants and histories sound; compilations sound), checked on every output, and open: for algorithm 1 the completeness of the classification, the generated instances typed declaratively for every declaration and level, their registration succeeding with enough fuel, and the signatures built by registrations type-correct, normalizing and consistent. |
+| `Programs/Copy.v` | `copy` on W, a call on a functional recursive field, directly and through the history; on ℕ_W. |
+| `Contracts.v` | The guarantees of the lecture: proved (classification faithful and strictly positive; registrations of declarations, instances, δ-constants and histories sound; compilations sound), checked on every output, and open: for algorithm 1 the completeness of the classification, the generated instances typed declaratively for every declaration and level, their registration succeeding with enough fuel, and the signatures built by registrations, compilations included, type-correct, normalizing and consistent; for algorithm 2 the history typed declaratively and registrable, the translation keeping the types of the right sides, the equations holding by definition, the checks of a compilation passing with enough fuel, and compiled functions total. |
 | `Tests.v` | Tests of every algorithm: classification diagnostics, generated rules, registrations and their refusals, the history of every family. |
 
 [`reference/`](reference/README.md) holds native versions of the lecture's
-algorithms, so far algorithm 1, compared with the extract. Ports from
+algorithms, both of them, compared with the extract. Ports from
 sibling projects are recorded in [PORTING.md](PORTING.md).

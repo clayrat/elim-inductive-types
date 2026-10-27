@@ -33,9 +33,9 @@ type raw_decl = {
   rd_ctors : raw_ctor list;
 }
 
-type site = SField of int | SResult
+type site = Diagnostics_native.site = SField of int | SResult
 
-type decl_error =
+type decl_error = Diagnostics_native.decl_error =
   | EOpenParams | EOpenIndices | ESelfReference
   | EOpenCtor of string | EDuplicateCtor of string
   | ENegative of string * int * term
@@ -239,7 +239,8 @@ let iota_rules d j =
 
 (* ** Registration *)
 
-type stage =
+(* The diagnostics are shared with algorithm 2 (Diagnostics_native). *)
+type stage = Diagnostics_native.stage =
   | AtIndType of string
   | AtCtorType of string * string
   | AtField of string * string * int
@@ -248,8 +249,10 @@ type stage =
   | AtRuleRhs of string * int * string
   | AtDefType of string
   | AtDefBody of string
+  | AtMotive of string * string
+  | AtEquation of string * int
 
-type reg_error =
+type reg_error = Diagnostics_native.reg_error =
   | RClassify of decl_error
   | RTaken of gref
   | RUndeclared of string
@@ -257,10 +260,12 @@ type reg_error =
   | RNotAType of stage * term
   | RRejected of stage * error
   | ROpen
+  | RCase of Diagnostics_native.case_error
+  | REquation of string * int * term * term
 
-type failure = Refuse of reg_error | NoFuelAt of stage * term
+type failure = Diagnostics_native.failure = Refuse of reg_error | NoFuelAt of stage * term
 
-type registration =
+type registration = Diagnostics_native.registration =
   | Registered of signature
   | Refused of reg_error
   | OutOfFuelAt of stage * term
@@ -285,12 +290,15 @@ let run spec fuel task =
 
 let refuse e = Error (Refuse e)
 
+let emit r st events = Queue.add (st, events) r.log
+let fuel_of r = r.fuel
+
 let add sg entry = match sig_add sg entry with Some sg -> Ok sg | None -> refuse ROpen
 
 (* A checker run at a stage: its events go to the log, its answer becomes
    the value, the refusal or the lack of fuel of the stage. *)
 let checked r st (events, answer) =
-  Queue.add (st, events) r.log;
+  emit r st events;
   match answer with
   | Accepted a -> Ok a
   | Rejected e -> refuse (RRejected (st, e))

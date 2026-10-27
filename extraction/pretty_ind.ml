@@ -1,7 +1,9 @@
-(* Printing for algorithm 1, on top of the kernel's printer: descriptions,
-   eliminator types with the motive named P, ι-rules with the variables of
-   their context named, and the diagnostics, stages and answers of
-   classification and registration.
+(* Printing for algorithms 1 and 2, on top of the kernel's printer:
+   descriptions, eliminator types with the motive named P, ι-rules with
+   the variables of their context named, the diagnostics, stages and
+   answers of classification, registration and compilation, the defining
+   equations of compiled functions with their pattern variables named,
+   and the redexes of normal-order traces.
 
    The extract defines its own [length], [map], [nth] and [rev]; this file
    uses the ones of [List] qualified. *)
@@ -161,3 +163,71 @@ let pp_registration ?(depth = max_int) = function
 (* A registration log: each stage with the number of its checker events. *)
 let pp_log log =
   List.map (fun (st, evs) -> pp_stage st ^ ": " ^ plural (List.length evs) "event") log
+
+(* ** Algorithm 2 *)
+
+let pp_strategy = function Direct -> "directly" | History -> "through the history"
+
+(* The equations of [fn], each with the names of its scope, innermost
+   first, from one run of the translation; [sg] is the signature it was
+   compiled in, or one extending it. *)
+let compiled_equations sg fn =
+  match named_equations predicative prog_fuel sg fn with
+  | None -> []
+  | Some nes -> List.map (fun (names, (l, r)) -> (names, l, r)) nes
+
+let pp_equation ?(depth = max_int) (names, l, r) =
+  pp_term ~depth ~names l ^ " ≡ " ^ pp_term ~depth ~names r
+
+(* The redexes of the kernel's [contract], by name. *)
+let redex sg t =
+  match t with
+  | App (Lam _, _) -> Some "β"
+  | App _ -> (
+      match iota sg t with
+      | Some _ -> Some (match spine_head t with Const g -> "ι " ^ pp_gref g | _ -> "ι")
+      | None -> None)
+  | Ann _ -> Some "∷"
+  | ElimUnit (_, _, Tt) -> Some "ι elimUnit"
+  | ElimBool (_, _, _, (BTrue | BFalse)) -> Some "ι elimBool"
+  | Fst (Pair _) -> Some "fst"
+  | Snd (Pair _) -> Some "snd"
+  | Const g -> Option.map (fun _ -> "δ " ^ pp_gref g) (sig_delta sg g)
+  | _ -> None
+
+let components t t' =
+  match (t, t') with
+  | Pi (a, b), Pi (a', b') | Sigma (a, b), Sigma (a', b') | App (a, b), App (a', b')
+  | Pair (a, b), Pair (a', b') | ElimVoid (a, b), ElimVoid (a', b') ->
+      [ (a, a'); (b, b') ]
+  | Lam b, Lam b' | Fst b, Fst b' | Snd b, Snd b' -> [ (b, b') ]
+  | ElimUnit (c, m, u), ElimUnit (c', m', u') -> [ (c, c'); (m, m'); (u, u') ]
+  | ElimBool (c, x, y, b), ElimBool (c', x', y', b') -> [ (c, c'); (x, x'); (y, y'); (b, b') ]
+  | _ -> []
+
+(* The redex a step [t ⇝ t'] of normal order contracts.  Normal order
+   contracts a redex where it finds one, and descends otherwise, so the
+   first redex on the path to the one component the step changes is
+   it.  "?" if there is none. *)
+let rec step_redex sg t t' =
+  match redex sg t with
+  | Some r -> r
+  | None -> (
+      match List.filter (fun (a, b) -> not (term_eqb a b)) (components t t') with
+      | [ (a, b) ] -> step_redex sg a b
+      | _ -> "?")
+
+let rec trace_redexes sg = function
+  | a :: (b :: _ as rest) -> step_redex sg a b :: trace_redexes sg rest
+  | _ -> []
+
+(* The redexes of a trace, consecutive repeats counted. *)
+let pp_redexes rs =
+  let rec group = function
+    | [] -> []
+    | r :: rest ->
+        let rec count n = function r' :: rest' when r' = r -> count (n + 1) rest' | rest' -> (n, rest') in
+        let n, rest' = count 1 rest in
+        (if n = 1 then r else r ^ " ×" ^ string_of_int n) :: group rest'
+  in
+  String.concat " · " (group rs)

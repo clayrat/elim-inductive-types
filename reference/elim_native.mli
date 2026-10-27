@@ -18,9 +18,9 @@ type raw_decl = {
   rd_ctors : raw_ctor list;
 }
 
-type site = SField of int | SResult
+type site = Diagnostics_native.site = SField of int | SResult
 
-type decl_error =
+type decl_error = Diagnostics_native.decl_error =
   | EOpenParams | EOpenIndices | ESelfReference
   | EOpenCtor of string | EDuplicateCtor of string
   | ENegative of string * int * term       (* constructor, field, its type *)
@@ -54,7 +54,9 @@ val iota_rules : ind_desc -> int -> iota_rule list
 
 (** {1 Registration} *)
 
-type stage =
+(* The stages and answers are shared with algorithm 2 (Diagnostics_native),
+   whose stages and errors they include. *)
+type stage = Diagnostics_native.stage =
   | AtIndType of string
   | AtCtorType of string * string
   | AtField of string * string * int
@@ -63,8 +65,10 @@ type stage =
   | AtRuleRhs of string * int * string
   | AtDefType of string
   | AtDefBody of string
+  | AtMotive of string * string
+  | AtEquation of string * int
 
-type reg_error =
+type reg_error = Diagnostics_native.reg_error =
   | RClassify of decl_error
   | RTaken of gref
   | RUndeclared of string
@@ -72,10 +76,12 @@ type reg_error =
   | RNotAType of stage * term
   | RRejected of stage * error
   | ROpen
+  | RCase of Diagnostics_native.case_error
+  | REquation of string * int * term * term
 
-type failure = Refuse of reg_error | NoFuelAt of stage * term
+type failure = Diagnostics_native.failure = Refuse of reg_error | NoFuelAt of stage * term
 
-type registration =
+type registration = Diagnostics_native.registration =
   | Registered of signature
   | Refused of reg_error
   | OutOfFuelAt of stage * term
@@ -100,6 +106,15 @@ val unit_name : int -> string
 val unit_at : int -> term
 val tt_at : int -> term
 val ensure_unit : registrar -> signature -> int -> (signature, failure) result
+
+(** {1 For algorithm 2} *)
+
+val refuse : reg_error -> ('a, failure) result
+val emit : registrar -> stage -> event list -> unit       (* a stage without a checker run *)
+val fuel_of : registrar -> int
+(* [sort_of r sg st gamma a]: the sort [a] has in [gamma], its checker run
+   logged at [st]. *)
+val sort_of : registrar -> signature -> stage -> ctx -> term -> (sort, failure) result
 
 val declare_checked : spec -> int -> signature -> raw_decl -> int list -> log * registration
 val declare_bypassing : spec -> int -> signature -> raw_decl -> int list -> log * registration

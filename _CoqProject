@@ -49,5 +49,6 @@ theories/Programs/Direct.v
 theories/Programs/Half.v
 theories/Programs/Append.v
 theories/Programs/Rejected.v
+theories/Programs/Copy.v
 theories/Contracts.v
 theories/Tests.v

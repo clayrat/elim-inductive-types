@@ -1,6 +1,8 @@
-(* Regression tests of the extracted algorithm 1 and of its printer: the
-   generated eliminators and rules, the diagnostics and the answers of
-   registration, as the demos print them. *)
+(* Regression tests of the extracted algorithms 1 and 2 and of their
+   printer: the generated eliminators and rules, the diagnostics and the
+   answers of registration, the equations of the compiled programs, the
+   redexes of their conversions, and the refusals, as the demos print
+   them. *)
 open Deptypes
 open Pretty
 open Pretty_ind
@@ -88,5 +90,89 @@ let () =
     (pp_registration (snd (define_checked predicative fuel sg_nat0 "double" double_ty
                               (Lam (App (Const (Def "double"), Var 0))))))
     "refused: the body of double: the constant double is not in the signature";
+
+  (* ℕ_W *)
+  expect "ind_W refused" (pp_registration (snd ind_w_run))
+    "refused: the body of ind_W: #6 (#1 tt) (#0 tt) has type #8 (succ_W (#1 tt)), expected #8 (sup Bool IsTrue true #1)";
+  expect "ind_W branch false"
+    (pp_answer ~names:[ "h"; "f"; "s"; "z"; "P" ] (fun () -> "") (snd ind_false_run))
+    "rejected: z has type P zero_W, expected P (sup Bool IsTrue false f)";
+
+  (* algorithm 2 *)
+  let applied f args = List.fold_left (fun t a -> NApp (t, a)) (NConst (Def f)) args in
+  let eval sg t = pp_eval_result (normalize sg prog_fuel (build [] t)) in
+  let refused_with run = pp_registration (snd run) in
+  let equations run fn = String.concat " | " (List.map pp_equation (compiled_equations (sg_of run) fn)) in
+  let redexes run t = pp_redexes (trace_redexes (sg_of run) (fst (normalize_trace (sg_of run) prog_fuel t))) in
+  let plus = NConst (Def "plus") in
+  let programs =
+    [ direct_run, plus_fn; direct_run, pow_fn; direct_run, f_fn; half_run, half_fn History; even_run, even_fn;
+      append_run, append_fn "append" plus; append_run, sumv_fn;
+      copy_run, copy_fn "copy" Direct; copy_run, copy_fn "copy_h" History ] in
+  List.iter (fun (run, fn) ->
+      List.iteri (fun i (_, l, r) ->
+          List.iter (fun t ->
+              if List.mem "?" (trace_redexes (sg_of run) (fst (normalize_trace (sg_of run) prog_fuel t))) then
+                expect (Printf.sprintf "%s equation %d: every step a redex" fn.fn_name i) "?" "no ?")
+            [ l; r ])
+        (compiled_equations (sg_of run) fn))
+    programs;
+  expect "plus equations" (equations direct_run plus_fn) "plus zero m ≡ m | plus (succ k) m ≡ succ (plus k m)";
+  expect "f equations" (equations direct_run f_fn) "f zero b ≡ tt | f (succ k) b ≡ ⟨b, f k (succ b)⟩";
+  expect "pow (succ k)" (match compiled_equations sg_direct pow_fn with
+      | [ _; (_, l, _) ] -> redexes direct_run l | _ -> "")
+    "δ pow · β · ι elimNat[1] · β ×2";
+  expect "f 2 0" (eval sg_direct (applied "f" [ num 2; num 0 ])) "normal form ⟨zero, ⟨succ zero, tt⟩⟩";
+  expect "Below_Nat_0" (match sig_delta sg_half (Def "Below_Nat_0") with Some b -> pp_term b | None -> "")
+    "λx. elimNat[1] (λy. Type₀) Unit (λy. λz. x y × z)";
+  expect "half directly" (refused_with (compile_all predicative prog_fuel sg_nat0 [ half_fn Direct ]))
+    "refused: a call on a subterm deeper than a field, without the history: half #1";
+  expect "half equations" (equations half_run (half_fn History))
+    "half zero ≡ zero | half (succ zero) ≡ zero | half (succ (succ k)) ≡ succ (half k)";
+  expect "half access" (match sig_delta sg_half (Def "half") with Some b -> pp_term b | None -> "")
+    "λx. recBelow_Nat_0 (λy. Nat) (λy. λz. elimNat[0] (λu. Below_Nat_0 (λv. Nat) u → Nat) (λu. zero) (λu. λv. λw. elimNat[0] (λx'. Below_Nat_0 (λy'. Nat) (succ x') → Nat) (λx'. zero) (λx'. λy'. λz'. succ (fst (snd z'))) u w) y z) x";
+  expect "half 5" (eval sg_half (applied "half" [ num 5 ])) "normal form succ (succ zero)";
+  expect "isEven equations" (equations even_run even_fn)
+    "isEven zero ≡ Unit | isEven (succ zero) ≡ Void | isEven (succ (succ k)) ≡ isEven k";
+  expect "tt : isEven 4"
+    (answer_unit (run_check predicative sg_even prog_fuel [] Tt (build [] (applied "isEven" [ num 4 ])))) "accepted";
+  expect "tt : isEven 3"
+    (answer_unit (run_check predicative sg_even prog_fuel [] Tt (build [] (applied "isEven" [ num 3 ]))))
+    "rejected: tt has type Unit, expected isEven (succ (succ (succ zero)))";
+  expect "Unit for Unit_1" (refused_with unit_history_run)
+    "refused: the body of Below_Nat_1: Unit has type Type₀, expected (λx. Type₁) zero";
+  expect "append equations" (equations append_run (append_fn "append" plus))
+    "append A zero m (nil A) ys ≡ ys | append A (succ k) m (cons A k x xs') ys ≡ cons A (plus k m) x (append A k m xs' ys)";
+  let sg_plus2 = sg_of (compile_all predicative prog_fuel sg_vec [ plus2_fn ]) in
+  let append2 = append_fn "append2" (NConst (Def "plus2")) in
+  expect "append2 nil"
+    (match (refusal (compile_all predicative prog_fuel sg_plus2 [ append2 ]),
+            named_equations predicative prog_fuel sg_plus2 append2) with
+     | Some (RRejected (_, e)), Some ((names, _) :: _) -> pp_error ~names e
+     | _ -> "")
+    "ys has type Vec A m, expected Vec A (plus2 zero m)";
+  expect "sumv motive" (match sig_delta sg_append (Def "sumv") with
+      | Some (Lam (Lam (Lam s))) -> pp_term (List.nth (spine_args s) 1) | _ -> "")
+    "λx. λy. pow x → Nat";
+  expect "g" (refused_with (compile_all predicative prog_fuel sg_direct [ pred_fn; g_fn ]))
+    "refused: a call on no strict subterm of the structural argument: g (pred #2)";
+  expect "ack in m" (refused_with (compile_all predicative prog_fuel sg_direct [ ack_fn "m" ]))
+    "refused: a call on no strict subterm of the structural argument: ack (succ #4) #1";
+  expect "ack in n" (refused_with (compile_all predicative prog_fuel sg_direct [ ack_fn "n" ]))
+    "refused: a call on no strict subterm of the structural argument: ack #2 (succ zero)";
+  expect "len varying" (refused_with (compile_all predicative prog_fuel sg_list [ len_fn Varying (NVar "A") ]))
+    "refused: the parameters of the type of xs mention A, which varies: non-uniform recursion";
+  expect "len changed"
+    (refused_with (compile_all predicative prog_fuel sg_list [ len_fn Constant (NConst (Ind "Nat")) ]))
+    "refused: the constant argument A changes: len Nat #2";
+  expect "ack 2 2" (eval sg_ack (applied "ack" [ num 2; num 2 ]))
+    "normal form succ (succ (succ (succ (succ (succ (succ zero))))))";
+  expect "copy equations" (equations copy_run (copy_fn "copy" Direct))
+    "copy A B (sup A B a f) ≡ sup A B a (λx. copy A B (f x))";
+  let zero_w = NConst (Def "zero_W") in
+  expect "copy zero_W"
+    (match convert sg_copy prog_fuel (build [] (applied "copy" [ NBool; NConst (Def "IsTrue"); zero_w ])) (build [] zero_w)
+     with ConvDifferent -> "different" | _ -> "not different")
+    "different";
 
   if !failures > 0 then exit 1 else print_endline "regress: all tests passed"
