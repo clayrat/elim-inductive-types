@@ -11,7 +11,10 @@
     types rebuilt from a description are the declared ones) and strictly
     positive; and whatever a registration returns has passed its checks
     in the sense of the annotated kernel: declarations, instances of
-    eliminators with their ι-rules, and δ-constants.
+    eliminators with their ι-rules, δ-constants, and, for algorithm 2,
+    the history [Below_D], [build_D], [recBelow_D] and every compiled
+    function: a δ-constant checked against its declared type without
+    itself, its defining equations holding by conversion.
 
     Open for algorithm 1, stated below: the classification is complete
     for the grammar; for every accepted declaration and every level the
@@ -45,6 +48,8 @@ From DepTypes.Common Require Import Result.
 From DepTypes.PTS Require Import Syntax Signature Typing Bidir.
 From DepTypes.Configs Require Import Predicative.
 From IndTypes.Elim Require Import Decl Generate Declare.
+From IndTypes.Recursion Require Import Below CaseTree Compile.
+From DepTypes.PTS Require Import Eval.
 From Stdlib Require Import List.
 Import ListNotations.
 
@@ -207,3 +212,42 @@ Definition registrations_normalizing : Prop :=
     what the bypass gives up. *)
 Definition registrations_consistent : Prop :=
   forall sg t, built sg -> ~ has_type predicative sg [] t Void.
+
+(** ** The history (algorithm 2) *)
+
+(** Whatever the registration of the history returns: it was there
+    already, or over a signature extending the given one (by [Unit_ℓ] and
+    the instances it needs) [Below_D], [build_D] and [recBelow_D] are
+    δ-constants, each checked in the signature before it. *)
+Definition history_sound : Prop :=
+  forall S fuel sg D j log log' sg',
+  ensure_below S fuel sg D j log = (log', Ok sg') ->
+  sg' = sg \/
+  exists d sg3 sg4 sg5,
+    sig_ind sg D = Some d /\ (exists es, sig_entries sg3 = es ++ sig_entries sg) /\
+    defined S sg3 (below_name D j) (below_type d j) (below_body d j) sg4 /\
+    defined S sg4 (build_name D j) (build_type d j) (build_body d j) sg5 /\
+    defined S sg5 (recbelow_name D j) (recbelow_type d j) (recbelow_body d j) sg'.
+
+Theorem history_sound_holds : history_sound.
+Proof. intros S fuel. apply ensure_below_sound. Qed.
+
+(** ** Compilation (algorithm 2) *)
+
+(** Whatever [compile] registers: over a signature extending the given
+    one by the history and the instances it needs, the function is a
+    δ-constant whose type is a type and whose body checks against it
+    there, without the function itself; and every defining equation the
+    translation derived from the tree, one per leaf, holds by conversion
+    in the signature with it. *)
+Definition compilation_sound : Prop :=
+  forall S fuel sg fn log log' sg',
+  compile S fuel sg fn log = (log', Ok sg') ->
+  exists sg0 A b eqs,
+    (exists log1 log2, compile_term S fuel sg fn log1 = (log2, Ok (sg0, A, b, eqs))) /\
+    (exists es, sig_entries sg0 = es ++ sig_entries sg) /\
+    defined S sg0 (fn_name fn) A b sg' /\
+    Forall (fun eq => exists c, convert sg' fuel (fst eq) (snd eq) = ConvEqual c) eqs.
+
+Theorem compilation_sound_holds : compilation_sound.
+Proof. intros S fuel. apply compile_sound. Qed.

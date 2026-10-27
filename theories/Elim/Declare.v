@@ -38,7 +38,11 @@
     tt_ℓ : Unit_ℓ] is declared by algorithm 1, its result exactly
     [Type_ℓ]: without cumulativity [Unit : Type₀] cannot stand for it.
 
-    Every run of the checker is logged with the stage it belongs to. *)
+    Every run of the checker is logged with the stage it belongs to.  The
+    compiler of algorithm 2 (Recursion.Compile) registers in the same way
+    and logs in the same terms: the sorts of its motives, its δ-constants
+    and its defining equations.  The diagnostics of both algorithms are in
+    Diagnostics, which depends on neither. *)
 
 From Stdlib Require Import List Bool Arith.
 From Stdlib Require String.
@@ -49,39 +53,14 @@ Local Open Scope string_scope.
 From DepTypes.Common Require Import Result Traced.
 From DepTypes.PTS Require Import Syntax Spec Signature Eval Check.
 From IndTypes.Elim Require Import Decl Generate.
+From IndTypes Require Export Diagnostics.
 
 Local Notation string := String.string.
 
-(** ** Stages, diagnostics and answers *)
+(** ** The registration monad
 
-Inductive stage : Type :=
-| AtIndType : string -> stage                     (** the type of D *)
-| AtCtorType : string -> string -> stage          (** D, the constructor *)
-| AtField : string -> string -> nat -> stage      (** D, the constructor, the field *)
-| AtElimType : string -> nat -> stage             (** D, j *)
-| AtRuleLhs : string -> nat -> string -> stage    (** D, j, the constructor *)
-| AtRuleRhs : string -> nat -> string -> stage
-| AtDefType : string -> stage
-| AtDefBody : string -> stage.
-
-Inductive reg_error : Type :=
-| RClassify : decl_error -> reg_error
-| RTaken : gref -> reg_error                      (** the name is in the signature already *)
-| RUndeclared : string -> reg_error               (** an instance of a type not declared *)
-| RLevel : string -> nat -> sort -> nat -> reg_error
-    (** the constructor, the field, its sort, the level of D *)
-| RNotAType : stage -> term -> reg_error          (** the type of the term does not unfold to a sort *)
-| RRejected : stage -> error -> reg_error         (** the checker rejected the input of the stage *)
-| ROpen : reg_error.                              (** an entry with a free variable *)
-
-Inductive reg_failure : Type :=
-| Refuse : reg_error -> reg_failure
-| NoFuelAt : stage -> term -> reg_failure.
-
-Inductive registration : Type :=
-| Registered : signature -> registration
-| Refused : reg_error -> registration
-| OutOfFuelAt : stage -> term -> registration.
+    The stages, refusals and answers are those of Diagnostics, exported
+    with this module. *)
 
 Definition R (A : Type) : Type := traced (stage * list event) reg_failure A.
 

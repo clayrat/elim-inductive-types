@@ -96,7 +96,9 @@ Definition with_diagonal (B diagonal : nterm) : list (stage * list event) * regi
 Definition sg_of (r : list (stage * list event) * registration) : signature :=
   match registered r with Some sg => sg | None => ∅ end.
 
-Definition sg_void : signature := sg_of (with_diagonal NVoid (λ "d", unmk "d" "d")).
+Definition void_diagonal : list (stage * list event) * registration :=
+  with_diagonal NVoid (λ "d", unmk "d" "d").
+Definition sg_void : signature := sg_of void_diagonal.
 
 (** A closed proof of Void, by one case analysis: no [fix], no
     impredicativity.  Its normalization does not end. *)
@@ -109,10 +111,12 @@ Proof. split; vm_compute; [reflexivity | trivial]. Qed.
     checking [tt : IsTrue (delta (mk delta))] does not end. *)
 Definition bnot (x : nterm) : nterm := NElimBool ((λ "_", NBool) ∷ (NBool ~> Type@ 0)) NFalse NTrue x.
 Definition is_true (b : nterm) : nterm := NElimBool ((λ "_", Type@ 0) ∷ (NBool ~> Type@ 1)) NUnit NVoid b.
-Definition sg_bool : signature := sg_of (with_diagonal NBool (λ "d", bnot (unmk "d" "d"))).
+Definition bool_diagonal : list (stage * list event) * registration :=
+  with_diagonal NBool (λ "d", bnot (unmk "d" "d")).
+Definition sg_bool : signature := sg_of bool_diagonal.
 
 Example diagonal_undecided :
-  registered (with_diagonal NBool (λ "d", bnot (unmk "d" "d"))) <> None /\
+  registered bool_diagonal <> None /\
   snd (run_check predicative sg_bool pos_fuel [] Tt (build [] (is_true (delta (mk delta))))) = Undecided Tt.
 Proof. split; vm_compute; [discriminate | reflexivity]. Qed.
 

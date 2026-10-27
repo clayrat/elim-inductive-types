@@ -15,7 +15,7 @@ rocq: vendor/pts-dependent-types/theories/PTS/Syntax.v Makefile.coq
 	$(MAKE) -f Makefile.coq
 
 # The extracted generator and compiler: OCaml demonstrations and regression
-# tests.
+# tests; the native reference compared with the extract.
 extract:
 	$(MAKE) -C extraction extract
 
@@ -24,6 +24,7 @@ demo:
 
 test:
 	$(MAKE) -C extraction test
+	$(MAKE) -C reference test
 
 # Every proved contract of theories/Contracts.v is closed under the global
 # context: no axioms.
@@ -46,5 +47,6 @@ check: rocq assumptions test
 clean:
 	@if test -f Makefile.coq; then $(MAKE) -f Makefile.coq clean; fi
 	$(MAKE) -C extraction clean
+	$(MAKE) -C reference clean
 	rm -f Makefile.coq Makefile.coq.conf .Makefile.coq.d
 	rm -rf checks

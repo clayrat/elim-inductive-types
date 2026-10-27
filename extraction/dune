@@ -11,7 +11,7 @@
 (library
  (name deptypes_pretty)
  (wrapped false)
- (modules pretty)
+ (modules pretty pretty_ind)
  (libraries deptypes))
 
 (executable

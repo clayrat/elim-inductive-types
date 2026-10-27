@@ -1,8 +1,9 @@
 (** * Extraction driver
 
-    Exports the kernel's checker and evaluator and, as they appear, the
-    generator of eliminators, the compiler of structural recursion and
-    the lecture examples into generated/deptypes.ml.  The extract keeps
+    Exports the kernel's checker and evaluator, algorithm 1 (the
+    classification of declarations, the generator of eliminators and the
+    registration of declarations, instances and δ-constants) and the
+    declarations of the lecture (Data/) into generated/deptypes.ml.  The extract keeps
     the kernel's module name, so the kernel's printer (extraction/pretty.ml
     of the submodule, which make copies next to it) compiles against it
     unchanged; [observe] is extracted only for the observations it prints.
@@ -13,6 +14,9 @@ From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt ExtrOcamlNa
 From DepTypes.PTS Require Import Syntax Named Spec Signature Eval Check.
 From DepTypes.Configs Require Import Finite Predicative.
 From DepTypes.SystemU Require Import Encodings.
+From DepTypes.MLTT Require Import Constants Families.
+From IndTypes.Elim Require Import Decl Generate Declare.
+From IndTypes.Data Require Import Nat Lists Tree W Primitives Positivity.
 
 Extraction Language OCaml.
 Set Extraction Output Directory "generated".
@@ -35,4 +39,12 @@ Extraction "deptypes.ml"
   lambda_star system_u system_u_minus predicative pure_predicative u_to_univ
   classify normalize_trace normalize whnf convert
   infer check run_infer run_check
-  observe.
+  observe
+  classify_decl classify_decl_with
+  motive_type method_type elim_type iota_rules
+  declare declare_with declare_elim ensure_elim check_rule define declare_checked declare_bypassing define_checked run_registration
+  registered refusal ensure_unit unit_at tt_at unit_name
+  nat_desc elim_nat_ty double_body vec_desc w_desc
+  raw_nat sg_nat0 raw_list list_desc raw_vec raw_tree tree_desc raw_w
+  raw_void raw_unit raw_bool void_desc unit_desc bool_desc to_prim void_schema unit_schema bool_schema
+  raw_negative raw_negative_bool raw_non_strict void_diagonal bool_diagonal sg_void sg_bool.
