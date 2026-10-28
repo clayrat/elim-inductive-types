@@ -53,6 +53,7 @@ Extraction "deptypes.ml"
   raw_void raw_unit raw_bool void_desc unit_desc bool_desc to_prim void_schema unit_schema bool_schema
   raw_negative raw_negative_bool raw_non_strict void_diagonal bool_diagonal sg_void sg_bool
   ensure_below below_name build_name recbelow_name
+  generalize
   compile_checked compile_all named_equations
   prog_fuel num plus_fn pow_fn f_fn direct_run sg_direct
   half_fn even_fn half_run even_run sg_half sg_even unit_history_run

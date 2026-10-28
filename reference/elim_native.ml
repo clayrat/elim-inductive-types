@@ -5,21 +5,13 @@
    compares it with the extract. *)
 
 open Pts_native
+open Telescope_native
+open Method_layout_native
+open Common_native
 
-let ( let* ) = Result.bind
-let require ok error = if ok then Ok () else Error error
-
-let rec map_ok f = function
-  | [] -> Ok []
-  | x :: xs -> let* y = f x in let* ys = map_ok f xs in Ok (y :: ys)
-
-let rec iter_ok f = function
-  | [] -> Ok ()
-  | x :: xs -> let* () = f x in iter_ok f xs
-
-let rec fold_ok f acc = function
-  | [] -> Ok acc
-  | x :: xs -> let* acc = f acc x in fold_ok f acc xs
+(* The registration monad and the diagnostics of both algorithms,
+   re-exported as Elim/Declare.v exports Registration.v. *)
+include Registration_native
 
 (* ** Classification *)
 
@@ -32,19 +24,6 @@ type raw_decl = {
   rd_level : int;
   rd_ctors : raw_ctor list;
 }
-
-type site = Diagnostics_native.site = SField of int | SResult
-
-type decl_error = Diagnostics_native.decl_error =
-  | EOpenParams | EOpenIndices | ESelfReference
-  | EOpenCtor of string | EDuplicateCtor of string
-  | ENegative of string * int * term
-  | ENonStrict of string * int * term
-  | ENested of string * int * term
-  | ENotFamily of string * term
-  | EArity of string * site * term
-  | ENonUniform of string * site * term
-  | EInIndices of string * site * term
 
 (* Whether D, one of its constructors or an instance of its eliminator
    occurs in a term. *)
@@ -62,10 +41,6 @@ let free_of name t = not (mentions name t)
 
 let family_spine name t = match spine t with Const (Ind d), _ -> d = name | _ -> false
 
-let rec split_pis = function
-  | Pi (a, b) -> let domains, body = split_pis b in (a :: domains, body)
-  | t -> ([], t)
-
 (* Where D occurs in a type outside the grammar: as the head of a spine at
    a negative position, or anywhere but the head of a spine.  A product
    flips the polarity of its domain. *)
@@ -79,11 +54,10 @@ let rec occurrences name positive = function
       { negative = not positive; nested = List.exists (mentions name) (snd (spine t)) }
   | t -> { negative = false; nested = mentions name t }
 
-let rec first_duplicate = function
-  | [] -> None
-  | x :: rest -> if List.mem x rest then Some x else first_duplicate rest
+(* Whether classification checks strict positivity, or bypasses it. *)
+type positivity = Checked | Bypass
 
-let classify_decl_with bypass d =
+let classify_decl_with mode d =
   let name = d.rd_name in
   let p = List.length d.rd_params and q = List.length d.rd_indices in
   (* The indices of a spine of D [k] binders above the parameters: D is
@@ -104,12 +78,14 @@ let classify_decl_with bypass d =
     if List.for_all (free_of name) domains && family_spine name body then
       let* indices = family_args c (SField l) (List.length domains + l) body in
       Ok (FRec (domains, indices))
-    else if bypass then Ok (FArg a)
     else
-      let o = occurrences name true a in
-      Error (if o.negative then ENegative (c, l, a)
-             else if o.nested then ENested (c, l, a)
-             else ENonStrict (c, l, a))
+      match mode with
+      | Bypass -> Ok (FArg a)
+      | Checked ->
+          let o = occurrences name true a in
+          Error (if o.negative then ENegative (c, l, a)
+                 else if o.nested then ENested (c, l, a)
+                 else ENonStrict (c, l, a))
   in
   let rec classify_con c l = function
     | Pi (a, b) ->
@@ -137,33 +113,15 @@ let classify_decl_with bypass d =
   Ok { ind_name = name; ind_params = d.rd_params; ind_indices = d.rd_indices;
        ind_level = d.rd_level; ind_ctors = ctors }
 
-let classify_decl = classify_decl_with false
+let classify_decl = classify_decl_with Checked
 
 (* ** Generation *)
-
-let rename r t = subst (fun n -> Var (r n)) t
-let up_ren r n = if n = 0 then 0 else r (n - 1) + 1
-let rec upn_ren m r = if m = 0 then r else up_ren (upn_ren (m - 1) r)
-
-(* Each entry of a telescope under the entries before it. *)
-let rec rename_tele r = function
-  | [] -> []
-  | a :: rest -> rename r a :: rename_tele (up_ren r) rest
 
 (* Entries independent of each other: the i-th lifted past the i before it. *)
 let lifted i tys = List.mapi (fun k a -> lift (i + k) a) tys
 
-(* From the context of the parameters and the earlier fields into the
-   telescope of a method: [positions] of the earlier fields among its b
-   binders so far, innermost first; a parameter lies past them all and
-   the motive. *)
-let transport positions b n =
-  match List.nth_opt positions n with
-  | Some position -> b - 1 - position
-  | None -> n - List.length positions + b + 1
-
 let motive_type d j =
-  let p = List.length d.ind_params and q = List.length d.ind_indices in
+  let p = nparams d and q = nindices d in
   pis d.ind_indices (Pi (apps (Const (Ind d.ind_name)) (vars q p @ vars 0 q), Srt (Univ j)))
 
 (* [Πȳ:B̄. P v̄ (r ȳ)] for the recursive field just bound: [r] renames
@@ -174,32 +132,31 @@ let hyp_type r b domains indices =
   pis (rename_tele r' domains)
     (apps (Var (b + 1 + m)) (List.map (rename (upn_ren m r')) indices @ [apps (Var m) (vars 0 m)]))
 
+(* The binders of the field [fd] at [l], its binder at [b] after the
+   earlier fields at [rbs], on the binders [tys] before it, innermost
+   first: the field and, after a recursive one, its hypothesis. *)
+let bind_field d tys fd l _ b rbs =
+  let r = transport rbs b in
+  match fd with
+  | FArg a -> rename r a :: tys
+  | FRec (domains, indices) ->
+      hyp_type r b domains indices :: rename r (field_type d.ind_name (nparams d) l fd) :: tys
+
 (* Each field, a recursive one followed by its hypothesis, then
    [P ū (c Δ ā)]. *)
 let method_type d c =
-  let name = d.ind_name and p = List.length d.ind_params in
-  let rec go positions b l = function
-    | [] ->
-        let fields = List.rev_map (fun position -> Var (b - 1 - position)) positions in
-        apps (Var b)
-          (List.map (rename (transport positions b)) c.ctor_indices
-           @ [apps (Const (Ctor (name, c.ctor_name))) (vars (b + 1) p @ fields)])
-    | fd :: rest ->
-        let r = transport positions b in
-        let field = rename r (field_type name p l fd) in
-        (match fd with
-         | FArg _ -> Pi (field, go (b :: positions) (b + 1) (l + 1) rest)
-         | FRec (domains, indices) ->
-             Pi (field, Pi (hyp_type r b domains indices, go (b :: positions) (b + 2) (l + 1) rest)))
-  in
-  go [] 0 0 c.ctor_fields
+  let tys, rbs, b = fold_slots (bind_field d) [] c.ctor_fields in
+  List.fold_left (fun body ty -> Pi (ty, body))
+    (apps (Var b)
+       (List.map (rename (transport rbs b)) c.ctor_indices
+        @ [apps (Const (Ctor (d.ind_name, c.ctor_name))) (vars (b + 1) (nparams d) @ field_vars rbs b)]))
+    tys
 
 let methods d = lifted 0 (List.map (method_type d) d.ind_ctors)
 
 (* [Π(Δ). ΠP. M₁ → ⋯ → M_k → Πθ̄. Πx:D Δ θ̄. P θ̄ x]. *)
 let elim_type d j =
-  let p = List.length d.ind_params and q = List.length d.ind_indices in
-  let k = List.length d.ind_ctors in
+  let p = nparams d and q = nindices d and k = nctors d in
   pis d.ind_params
     (Pi (motive_type d j,
          pis (methods d)
@@ -220,7 +177,7 @@ type iota_rule = {
    arguments are the kernel's own. *)
 let iota_rules d j =
   let name = d.ind_name in
-  let p = List.length d.ind_params and k = List.length d.ind_ctors in
+  let p = nparams d and k = nctors d in
   let past_methods n = n + k + 1 in
   List.mapi (fun i c ->
       let n = List.length c.ctor_fields in
@@ -239,79 +196,6 @@ let iota_rules d j =
 
 (* ** Registration *)
 
-(* The diagnostics are shared with algorithm 2 (Diagnostics_native). *)
-type stage = Diagnostics_native.stage =
-  | AtIndType of string
-  | AtCtorType of string * string
-  | AtField of string * string * int
-  | AtElimType of string * int
-  | AtRuleLhs of string * int * string
-  | AtRuleRhs of string * int * string
-  | AtDefType of string
-  | AtDefBody of string
-  | AtMotive of string * string
-  | AtEquation of string * int
-
-type reg_error = Diagnostics_native.reg_error =
-  | RClassify of decl_error
-  | RTaken of gref
-  | RUndeclared of string
-  | RLevel of string * int * sort * int
-  | RNotAType of stage * term
-  | RRejected of stage * error
-  | ROpen
-  | RCase of Diagnostics_native.case_error
-  | REquation of string * int * term * term
-
-type failure = Diagnostics_native.failure = Refuse of reg_error | NoFuelAt of stage * term
-
-type registration = Diagnostics_native.registration =
-  | Registered of signature
-  | Refused of reg_error
-  | OutOfFuelAt of stage * term
-
-type log = (stage * event list) list
-
-(* Every checker run of a registration goes to its log with the stage, as
-   the run of the native checker keeps its events in a queue. *)
-type registrar = { spec : spec; fuel : int; log : (stage * event list) Queue.t }
-
-let run_steps spec fuel task =
-  let r = { spec; fuel; log = Queue.create () } in
-  let result = task r in
-  (List.of_seq (Queue.to_seq r.log), result)
-
-let run spec fuel task =
-  let log, result = run_steps spec fuel task in
-  (log, match result with
-        | Ok sg -> Registered sg
-        | Error (Refuse e) -> Refused e
-        | Error (NoFuelAt (st, t)) -> OutOfFuelAt (st, t))
-
-let refuse e = Error (Refuse e)
-
-let emit r st events = Queue.add (st, events) r.log
-let fuel_of r = r.fuel
-
-let add sg entry = match sig_add sg entry with Some sg -> Ok sg | None -> refuse ROpen
-
-(* A checker run at a stage: its events go to the log, its answer becomes
-   the value, the refusal or the lack of fuel of the stage. *)
-let checked r st (events, answer) =
-  emit r st events;
-  match answer with
-  | Accepted a -> Ok a
-  | Rejected e -> refuse (RRejected (st, e))
-  | Undecided t -> Error (NoFuelAt (st, t))
-
-(* [a] is a type in [gamma]: its type unfolds to a sort. *)
-let sort_of r sg st gamma a =
-  let* ty = checked r st (run_infer ~sg r.spec r.fuel gamma a) in
-  match whnf ~sg r.fuel ty with
-  | HeadForm (Srt s) -> Ok s
-  | HeadForm other -> refuse (RNotAType (st, other))
-  | HeadOutOfFuel _ -> Error (NoFuelAt (st, a))
-
 let within s level = match s with Univ i -> i <= level | _ -> false
 
 (* Each field is a type of level at most that of D, in the context of the
@@ -319,14 +203,14 @@ let within s level = match s with Univ i -> i <= level | _ -> false
 let rec check_fields r sg d c gamma l = function
   | [] -> Ok ()
   | fd :: rest ->
-      let a = field_type d.ind_name (List.length d.ind_params) l fd in
+      let a = field_type d.ind_name (nparams d) l fd in
       let* s = sort_of r sg (AtField (d.ind_name, c, l)) gamma a in
       let* () = if within s d.ind_level then Ok () else refuse (RLevel (c, l, s, d.ind_level)) in
       check_fields r sg d c (a :: gamma) (l + 1) rest
 
-let declare_ind_with r bypass sg raw =
+let declare_ind_with r mode sg raw =
   let name = raw.rd_name in
-  let* d = Result.map_error (fun e -> Refuse (RClassify e)) (classify_decl_with bypass raw) in
+  let* d = Result.map_error (fun e -> Refuse (RClassify e)) (classify_decl_with mode raw) in
   let* () = if Option.is_some (find_ind sg name) then refuse (RTaken (Ind name)) else Ok () in
   let* sg1 = add sg (EInd d) in
   let* _ = sort_of r sg1 (AtIndType name) [] (ind_type d) in
@@ -338,9 +222,9 @@ let declare_ind_with r bypass sg raw =
 
 let check_rule r sg name j rule =
   let* () = checked r (AtRuleLhs (name, j, rule.rule_ctor))
-      (run_check ~sg r.spec r.fuel rule.rule_ctx rule.rule_lhs rule.rule_type) in
+      (run_check ~sg (spec_of r) (fuel_of r) rule.rule_ctx rule.rule_lhs rule.rule_type) in
   checked r (AtRuleRhs (name, j, rule.rule_ctor))
-    (run_check ~sg r.spec r.fuel rule.rule_ctx rule.rule_rhs rule.rule_type)
+    (run_check ~sg (spec_of r) (fuel_of r) rule.rule_ctx rule.rule_rhs rule.rule_type)
 
 (* The type of the instance; its rules, in a signature where it has none
    active; the instance with active rules. *)
@@ -353,23 +237,16 @@ let declare_elim r sg name j =
   let* () = iter_ok (check_rule r tmp name j) (iota_rules d j) in
   add sg (EElim (name, j, ty, true))
 
-let declare_with r bypass sg raw levels =
-  let* sg, _ = declare_ind_with r bypass sg raw in
+let declare_with r mode sg raw levels =
+  let* sg, _ = declare_ind_with r mode sg raw in
   fold_ok (fun sg j -> declare_elim r sg raw.rd_name j) sg levels
 
-let declare r = declare_with r false
+let declare r = declare_with r Checked
 
 let ensure_elim r sg name j =
   match find_elim sg name j with
   | Some (_, true) -> Ok sg
   | _ -> declare_elim r sg name j
-
-(* A δ-constant, checked in the signature without it. *)
-let define r sg f ty body =
-  let* () = if Option.is_some (find_def sg f) then refuse (RTaken (Def f)) else Ok () in
-  let* _ = sort_of r sg (AtDefType f) [] ty in
-  let* () = checked r (AtDefBody f) (run_check ~sg r.spec r.fuel [] body ty) in
-  add sg (EDef (f, ty, body))
 
 (* [Unit_ℓ]: the primitive at level 0, a declaration above. *)
 let unit_name l = "Unit_" ^ string_of_int l
@@ -384,8 +261,7 @@ let tt_at l = if l = 0 then Tt else Const (Ctor (unit_name l, tt_name l))
 
 let ensure_unit r sg l =
   if l = 0 || Option.is_some (find_ind sg (unit_name l)) then Ok sg
-  else let* sg, _ = declare_ind_with r false sg (unit_decl l) in Ok sg
+  else let* sg, _ = declare_ind_with r Checked sg (unit_decl l) in Ok sg
 
 let declare_checked spec fuel sg raw levels = run spec fuel (fun r -> declare r sg raw levels)
-let declare_bypassing spec fuel sg raw levels = run spec fuel (fun r -> declare_with r true sg raw levels)
-let define_checked spec fuel sg f ty body = run spec fuel (fun r -> define r sg f ty body)
+let declare_bypassing spec fuel sg raw levels = run spec fuel (fun r -> declare_with r Bypass sg raw levels)

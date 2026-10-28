@@ -20,10 +20,14 @@ on complete answers and logs. They run on the kernel's native reference,
   right sides built by the native kernel's own `method_args`;
 - registration: a declaration with the types of D and its constructors and
   the levels of the fields, each instance in the four stages of the plan
-  with its rules checked where it has no active rules, δ-constants checked
-  without themselves, `Unit_ℓ`, and the bypass mode. Every checker run goes
-  to the log with its stage, as the native checker keeps its events in a
-  queue; `run` returns the log with the answer.
+  with its rules checked where it has no active rules, `Unit_ℓ`, and the
+  bypass mode.
+
+`registration_native.ml` is the registration monad of `theories/Registration.v`,
+below both algorithms: every checker run goes to the log with its stage, as
+the native checker keeps its events in a queue, and `run` returns the log
+with the answer.  Both algorithms register their δ-constants with its
+`define`, checked without themselves.
 
 `recursion_native.ml` is algorithm 2, in three parts following
 `Recursion/Below.v`, `Recursion/CaseTree.v` and `Recursion/Compile.v`:
@@ -44,11 +48,25 @@ on complete answers and logs. They run on the kernel's native reference,
   diagnostics of calls, the instances the motives need, and the
   registration of the function with its equations checked by conversion.
 
-It runs on the native algorithm 1, whose registrar it shares: one log
-holds the stages of both. The stages, diagnostics and answers of both
-algorithms are in `diagnostics_native.ml`, as in `theories/Diagnostics.v`,
-and `elim_native` re-exports them. Natural-number subtraction is written
-`-!`: as in Rocq, it stops at 0.
+It runs on the native algorithm 1 and shares its registrar: one log holds
+the stages of both. The stages, diagnostics and answers of both
+algorithms are in `diagnostics_native.ml`, as in `theories/Diagnostics.v`;
+`registration_native` re-exports them and `elim_native` both, by
+`include`, as the Rocq modules export them. The telescopes of
+`theories/Telescope.v` are in `telescope_native.ml`, which depends only on
+the kernel's syntax, with the `rename`, `up_ren` and `up_sub` that the
+native kernel does not export. The layout of the binders of a method,
+from `theories/MethodLayout.v`, is in `method_layout_native.ml`: one pass
+of `fold_slots` with an accumulator, in which both algorithms build their
+methods and binders directly. What both share besides — the combinators
+of results, the first duplicate and the sizes of a description — is in
+`common_native.ml`.
+Where a term or a description given as input, or the caller of an
+exported function, decides the bound, the
+natural-number subtraction of Rocq is written `-!` and stops at 0, a
+missing element of a list has its default (`nth_or`) and `combine` stops
+at the shorter list, as in Rocq; where the code itself guarantees the
+bound, the subtraction is plain and a lookup that cannot miss raises.
 
 `elim_native.mli` and `recursion_native.mli` are the interfaces.
 `data.ml` assembles the declarations of
@@ -84,8 +102,8 @@ and a family `Two` with two indices.
   grammar and outside it, and a result from another pool; each is
   classified, generated and registered over ℕ.
 
-`diff_recursion.ml` compares algorithm 2, with the conversions of
-`diff.ml`:
+`diff_recursion.ml` compares algorithm 2, with the comparisons of
+`test_support.ml`:
 
 - the programs of `programs.ml` with the extracted ones;
 - for every description of `data.ml`, `Unit_1` and a family of level 1,
@@ -124,10 +142,24 @@ make -C reference test
 # or: make test   (also runs the extraction's printer regressions)
 ```
 
+`conversions.ml` converts the native algorithms' declarations, rules,
+diagnostics, logs, programs and elaborated trees to the extract's.
+`test_support.ml` holds what both suites share: the comparisons and
+their counter, registration scripts and runs of the checker and of
+normalization by both sides, the specifications and budgets of fuel.
+`diff.ml` and `diff_recursion.ml` define their suites as functions, which
+`main.ml` runs: both, or the one named on the command line
+(`_build/diff elim`, `_build/diff recursion`), each reporting the
+comparisons it made itself. A difference names the
+comparison and, in a log or a list of rules, the first entry that
+differs with its native stage or constructor.
+
 The Makefile copies the extract and the kernel's `pts_native`, the named
 builder, the hand-written signatures and `extracted.ml` (the conversions of
-the kernel's syntax to the extract's) into `_build`, and compiles them with
-the files here into one test, which prints a line for each algorithm.
+the kernel's syntax to the extract's) into `_build` and compiles them
+there; the files here are compiled where they are into `_build`, every
+warning an error but fragile matches and a few others, and linked with
+them into one test, which prints a line for each algorithm.
 
 The differential test was checked against mutants of `elim_native.ml`: it
 catches 52 of 53 single changes to classification, generation and

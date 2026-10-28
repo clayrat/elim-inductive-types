@@ -31,11 +31,13 @@
     [P].  Without cumulativity [Unit : Type₀] does not stand for [Unit_ℓ]
     at ℓ > 0, which the history of [isEven] checks (Programs.Half).
 
-    The binders of a method are those of Elim.Generate: each field, a
-    recursive one followed at once by its hypothesis.  The method of
-    [Below_D] lies after the parameters and P, that of [build_D] after
-    them and [step], and [transport_past] renames the fields of the
-    description into its body. *)
+    The binders of a method are those of the eliminator, laid out by
+    [fold_slots] of MethodLayout: each field, a recursive one followed at
+    once by its hypothesis; each method is built in the accumulator of
+    that pass.  The method of [Below_D] lies after the parameters and P,
+    as in the eliminator, and [transport] renames the fields of the
+    description into its body; that of [build_D] lies after them and
+    [step], and [transport_past 2] does. *)
 
 From Stdlib Require Import List Arith.
 From Stdlib Require String.
@@ -44,6 +46,7 @@ Import (notations) String.StringSyntax.
 Local Open Scope string_scope.
 From DepTypes.Common Require Import Result Traced.
 From DepTypes.PTS Require Import Syntax Spec Signature.
+From IndTypes Require Import Registration Telescope MethodLayout.
 From IndTypes.Elim Require Import Decl Generate Declare.
 
 Local Notation string := String.string.
@@ -59,39 +62,6 @@ Definition recbelow_name (D : string) (j : nat) : string :=
 
 (** The level of the history of D for a motive in [Type_j]. *)
 Definition history_level (d : ind_desc) (j : nat) : nat := Nat.max (ind_level d) j.
-
-(** ** The binders of a method *)
-
-(** As [transport] of Elim.Generate, with [g] binders between the
-    parameters and those of the method. *)
-Definition transport_past (g : nat) (rbs : list nat) (b n : nat) : nat :=
-  match nth_error rbs n with
-  | Some bl => b - 1 - bl
-  | None => n - length rbs + (b + g)
-  end.
-
-(** A recursive field among the binders of a method: the position of its
-    binder, with its hypothesis right after it; the positions of the
-    earlier fields, innermost first; its domains and indices. *)
-Record rec_binder : Type := {
-  rb_pos : nat;
-  rb_before : list nat;
-  rb_domains : list term;
-  rb_indices : list term;
-}.
-
-(** The binders of a method from the fields [fs] on, after [b] binders
-    with the earlier fields at [rbs]: the positions of all the fields, the
-    number of binders, and the recursive fields. *)
-Fixpoint method_binders (rbs : list nat) (b : nat) (fs : list field)
-  : list nat * nat * list rec_binder :=
-  match fs with
-  | [] => (rbs, b, [])
-  | FArg _ :: fs' => method_binders (b :: rbs) (S b) fs'
-  | FRec Bs vs :: fs' =>
-      let '(rbs', b', rs) := method_binders (b :: rbs) (S (S b)) fs' in
-      (rbs', b', {| rb_pos := b; rb_before := rbs; rb_domains := Bs; rb_indices := vs |} :: rs)
-  end.
 
 (** ** Tuples at the level ℓ *)
 
@@ -139,20 +109,27 @@ Section Below.
   Definition below_type : term :=
     pis (ind_params d) (Pi (motive_type d j) (over_family 1 (Srt (Univ l)))).
 
-  (** The component of a recursive field [r : Πȳ:B̄. D Δ v̄] with its
-      hypothesis [ih], among [b] binders after the parameters and P:
-      [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ], where [ih ȳ] is the history of [r ȳ]. *)
-  Definition component (b : nat) (rb : rec_binder) : term :=
-    let m := length (rb_domains rb) in
-    let r := transport_past 1 (rb_before rb) b in
-    pis (rename_tele r (rb_domains rb))
-      (times (apps (Var (b + m)) (map (rename (upn_ren m r)) (rb_indices rb) ++
-                                  [apps (Var (b - 1 - rb_pos rb + m)) (vars 0 m)]))
-             (apps (Var (b - 2 - rb_pos rb + m)) (vars 0 m))).
+  (** The component of a recursive field [r : Πȳ:B̄. D Δ v̄] at [bl],
+      after the earlier fields at [rbs], with its hypothesis [ih], among
+      [b] binders after the parameters and P: [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ],
+      where [ih ȳ] is the history of [r ȳ]. *)
+  Definition component (b bl : nat) (rbs : list nat) (Bs vs : list term) : term :=
+    let m := length Bs in
+    let r := transport rbs b in
+    pis (rename_tele r Bs)
+      (times (apps (Var (b + m)) (map (rename (upn_ren m r)) vs ++ [apps (Var (b - 1 - bl + m)) (vars 0 m)]))
+             (apps (Var (b - 2 - bl + m)) (vars 0 m))).
 
+  (** The tuple of the components, built in the accumulator innermost
+      first. *)
   Definition below_method (c : ctor_desc) : term :=
-    let '(_, b, rs) := method_binders [] 0 (ctor_fields c) in
-    lams b (tuple_type l (map (component b) rs)).
+    let b := nbinders (ctor_fields c) in
+    let '(Cs, _, _) := fold_slots (fun Cs fd _ _ bl rbs =>
+                         match fd with
+                         | FRec Bs vs => component b bl rbs Bs vs :: Cs
+                         | FArg _ => Cs
+                         end) [] (ctor_fields c) in
+    lams b (tuple_type l (rev Cs)).
 
   (** [λΔ P. elim_D[ℓ+1] Δ (λθ̄ x. Type_ℓ) m̄]. *)
   Definition below_body : term :=
@@ -176,10 +153,14 @@ Section Below.
       [(step ū (c Δ ā) h, h)].  [step] lies right before the binders of
       the method. *)
   Definition build_method (c : ctor_desc) : term :=
-    let '(rbs, b, rs) := method_binders [] 0 (ctor_fields c) in
-    let h := tuple l (map (fun rb => Var (b - 2 - rb_pos rb)) rs) in
-    let obj := apps (Const (Ctor D (ctor_name c)))
-                 (vars (b + 2) p ++ map (fun bl => Var (b - 1 - bl)) (rev rbs)) in
+    let b := nbinders (ctor_fields c) in
+    let '(hs, rbs, _) := fold_slots (fun hs fd _ _ bl _ =>
+                           match fd with
+                           | FRec _ _ => Var (b - 2 - bl) :: hs
+                           | FArg _ => hs
+                           end) [] (ctor_fields c) in
+    let h := tuple l (rev hs) in
+    let obj := apps (Const (Ctor D (ctor_name c))) (vars (b + 2) p ++ field_vars rbs b) in
     lams b (Pair (apps (Var b) (map (rename (transport_past 2 rbs b)) (ctor_indices c) ++ [obj; h])) h).
 
   (** [λΔ P step. elim_D[ℓ] Δ (λθ̄ x. P θ̄ x × Below_D Δ P θ̄ x) m̄]. *)
@@ -210,32 +191,26 @@ Section Register.
     | None =>
         let! d := match sig_ind sg D with Some d => tret d | None => refuse (RUndeclared D) end in
         let l := history_level d j in
-        let! sg1 := ensure_unit Sp fuel sg l in
-        let! sg2 := ensure_elim Sp fuel sg1 D (S l) in
-        let! sg3 := ensure_elim Sp fuel sg2 D l in
-        let! sg4 := define Sp fuel sg3 (below_name D j) (below_type d j) (below_body d j) in
-        let! sg5 := define Sp fuel sg4 (build_name D j) (build_type d j) (build_body d j) in
-        define Sp fuel sg5 (recbelow_name D j) (recbelow_type d j) (recbelow_body d j)
+        let! sg := ensure_unit Sp fuel sg l in
+        let! sg := ensure_elim Sp fuel sg D (S l) in
+        let! sg := ensure_elim Sp fuel sg D l in
+        let! sg := define Sp fuel sg (below_name D j) (below_type d j) (below_body d j) in
+        let! sg := define Sp fuel sg (build_name D j) (build_type d j) (build_body d j) in
+        define Sp fuel sg (recbelow_name D j) (recbelow_type d j) (recbelow_body d j)
     end.
 End Register.
 
 (** ** What a registration of the history guarantees
 
     Over [Unit_ℓ] and the two instances, which their own registrations
-    guarantee (Elim.Declare), the three constructions are δ-constants,
-    each with a type that is a type and a body checked against it in the
-    signature before it, in the judgments of the annotated kernel. *)
-
-From DepTypes.PTS Require Import Bidir.
+    guarantee (Elim.Declare), the three constructions are δ-constants
+    [defined] as in Registration: each with a type that is a type and a
+    body checked against it in the signature before it, in the judgments
+    of the annotated kernel. *)
 
 Section Sound.
   Variable Sp : spec.
   Variable fuel : nat.
-
-  (** [sg'] is [sg] with the δ-constant [f : A := b], checked in [sg]. *)
-  Definition defined (sg : signature) (f : string) (A b : term) (sg' : signature) : Prop :=
-    sig_def sg f = None /\ (exists s, is_type_of Sp sg [] A s) /\ chk Sp sg [] b A /\
-    sig_entries sg' = EDef f A b :: sig_entries sg.
 
   Lemma ensure_unit_extends : forall sg l log log' sg',
     ensure_unit Sp fuel sg l log = (log', Ok sg') -> exists es, sig_entries sg' = es ++ sig_entries sg.
@@ -260,9 +235,9 @@ Section Sound.
     sg' = sg \/
     exists d sg3 sg4 sg5,
       sig_ind sg D = Some d /\ (exists es, sig_entries sg3 = es ++ sig_entries sg) /\
-      defined sg3 (below_name D j) (below_type d j) (below_body d j) sg4 /\
-      defined sg4 (build_name D j) (build_type d j) (build_body d j) sg5 /\
-      defined sg5 (recbelow_name D j) (recbelow_type d j) (recbelow_body d j) sg'.
+      defined Sp sg3 (below_name D j) (below_type d j) (below_body d j) sg4 /\
+      defined Sp sg4 (build_name D j) (build_type d j) (build_body d j) sg5 /\
+      defined Sp sg5 (recbelow_name D j) (recbelow_type d j) (recbelow_body d j) sg'.
   Proof.
     intros sg D j log log' sg' H. unfold ensure_below in H.
     destruct (sig_def sg (recbelow_name D j)); [left; now apply tret_ok in H | right].

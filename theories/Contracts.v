@@ -70,7 +70,7 @@ Local Notation string := String.string.
 (** The types of D and of its constructors rebuilt from the classified
     description are the declared ones, also in the bypass mode. *)
 Definition classification_faithful : Prop :=
-  forall bypass d desc, classify_decl_with bypass d = Ok desc ->
+  forall mode d desc, classify_decl_with mode d = Ok desc ->
   ind_name desc = rd_name d /\
   ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (Univ (rd_level d))) /\
   Forall2 (fun rc cd => ctor_name cd = rc_name rc /\ ctor_type desc cd = pis (rd_params d) (rc_type rc))
@@ -94,9 +94,9 @@ Proof. exact classify_decl_strictly_positive. Qed.
     exactly its entry; the types of D and of its constructors are types of
     the annotated kernel, and every field has a level at most that of D. *)
 Definition declaration_sound : Prop :=
-  forall S fuel bypass sg raw log log' sg' d,
-  declare_ind_with S fuel bypass sg raw log = (log', Ok (sg', d)) ->
-  classify_decl_with bypass raw = Ok d /\ sig_ind sg (rd_name raw) = None /\
+  forall S fuel mode sg raw log log' sg' d,
+  declare_ind_with S fuel mode sg raw log = (log', Ok (sg', d)) ->
+  classify_decl_with mode raw = Ok d /\ sig_ind sg (rd_name raw) = None /\
   sig_entries sg' = EInd d :: sig_entries sg /\
   (exists s, is_type_of S sg' [] (ind_type d) s) /\
   Forall (fun c => (exists s, is_type_of S sg' [] (ctor_type d c) s) /\
@@ -126,13 +126,14 @@ Definition instance_sound : Prop :=
 Theorem instance_sound_holds : instance_sound.
 Proof. intros S fuel. apply declare_elim_sound. Qed.
 
-(** A registered δ-constant has a type that is a type, and its body checks
-    against it in the signature without the constant. *)
+(** ** δ-constants (both algorithms) *)
+
+(** A registered δ-constant is [defined] (Registration): its name was
+    free, its type is a type, and its body checks against it in the
+    signature without the constant. *)
 Definition definition_sound : Prop :=
   forall S fuel sg f A b log log' sg',
-  define S fuel sg f A b log = (log', Ok sg') ->
-  sig_def sg f = None /\ (exists s, is_type_of S sg [] A s) /\ chk S sg [] b A /\
-  sig_entries sg' = EDef f A b :: sig_entries sg.
+  define S fuel sg f A b log = (log', Ok sg') -> defined S sg f A b sg'.
 
 Theorem definition_sound_holds : definition_sound.
 Proof. intros S fuel. apply define_sound. Qed.

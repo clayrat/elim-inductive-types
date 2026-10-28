@@ -33,9 +33,10 @@
     is registered (Elim.Declare): that needs the checker, and the
     recursive fields need D in the signature.
 
-    A bypass mode classifies a field that fails strict positivity as
-    non-recursive, for the demonstration of the negative field
-    (Data.Positivity); it is outside the contract.
+    Classification checks strict positivity ([Checked]); the bypass mode
+    ([Bypass]) classifies a field that fails it as non-recursive, for the
+    demonstration of the negative field (Data.Positivity), and is outside
+    the contract.
 
     Two theorems hold for every input.  [classify_decl_faithful]: the
     types of D and of its constructors rebuilt from the classified
@@ -50,6 +51,7 @@ From Stdlib Require String.
 Import ListNotations.
 From DepTypes.Common Require Import Result.
 From DepTypes.PTS Require Import Syntax Signature.
+From IndTypes Require Import Telescope Diagnostics.
 
 Local Notation string := String.string.
 
@@ -67,26 +69,6 @@ Record raw_decl : Type := mk_raw_decl {
   rd_level : nat;
   rd_ctors : list raw_ctor;
 }.
-
-(** ** Diagnostics *)
-
-Inductive site : Type :=
-| SField : nat -> site      (** a recursive field, by its position *)
-| SResult : site.           (** the result [D Δ ū] *)
-
-Inductive decl_error : Type :=
-| EOpenParams : decl_error                  (** a parameter mentions a later variable *)
-| EOpenIndices : decl_error
-| ESelfReference : decl_error               (** D in its own parameters or indices *)
-| EOpenCtor : string -> decl_error          (** a free variable past the parameters *)
-| EDuplicateCtor : string -> decl_error
-| ENegative : string -> nat -> term -> decl_error   (** constructor, field, its type *)
-| ENonStrict : string -> nat -> term -> decl_error
-| ENested : string -> nat -> term -> decl_error
-| ENotFamily : string -> term -> decl_error         (** the result is not [D Δ ū] *)
-| EArity : string -> site -> term -> decl_error     (** D with the wrong number of arguments *)
-| ENonUniform : string -> site -> term -> decl_error  (** D applied to other parameters *)
-| EInIndices : string -> site -> term -> decl_error.  (** D in the indices *)
 
 (** ** Occurrences of D *)
 
@@ -117,13 +99,6 @@ Definition family_spine (D : string) (t : term) : bool :=
   | _ => false
   end.
 
-(** The domains of a type and what is left after them. *)
-Fixpoint split_pis (t : term) : list term * term :=
-  match t with
-  | Pi A B => let (As, H) := split_pis B in (A :: As, H)
-  | _ => ([], t)
-  end.
-
 (** The occurrences of D in a type at a polarity: as the head of a spine
     at a positive or a negative position, or elsewhere. *)
 Record occurrences : Type := { occ_pos : bool; occ_neg : bool; occ_other : bool }.
@@ -151,10 +126,13 @@ Fixpoint first_duplicate (names : list string) : option string :=
 
 (** ** Classification *)
 
+(** Whether classification checks strict positivity, or bypasses it. *)
+Inductive positivity : Type := Checked | Bypass.
+
 Section Classify.
   Variable D : string.
   Variables p q : nat.        (** the numbers of parameters and of indices *)
-  Variable bypass : bool.
+  Variable mode : positivity.
 
   (** The indices of a spine of D at depth [k] above the parameters: D is
       applied to the parameters themselves, then to [q] terms free of D. *)
@@ -174,12 +152,15 @@ Section Classify.
     if forallb (free_of D) Bs && family_spine D H then
       let* vs := family_args c (SField l) (length Bs + l) H in
       Ok (FRec Bs vs)
-    else if bypass then Ok (FArg A)
     else
-      let o := occurrences_in D true A in
-      Err (if occ_neg o then ENegative c l A
-           else if occ_other o then ENested c l A
-           else ENonStrict c l A).
+      match mode with
+      | Bypass => Ok (FArg A)
+      | Checked =>
+          let o := occurrences_in D true A in
+          Err (if occ_neg o then ENegative c l A
+               else if occ_other o then ENested c l A
+               else ENonStrict c l A)
+      end.
 
   (** The fields from position [l] on, and the result indices. *)
   Fixpoint classify_con (c : string) (l : nat) (t : term)
@@ -201,13 +182,13 @@ Section Classify.
     Ok {| ctor_name := rc_name rc; ctor_fields := fst r; ctor_indices := snd r |}.
 End Classify.
 
-Definition classify_decl_with (bypass : bool) (d : raw_decl) : result decl_error ind_desc :=
+Definition classify_decl_with (mode : positivity) (d : raw_decl) : result decl_error ind_desc :=
   let p := length (rd_params d) in
   let q := length (rd_indices d) in
   let* _ := require (tele_closed 0 (rd_params d)) EOpenParams in
   let* _ := require (tele_closed p (rd_indices d)) EOpenIndices in
   let* _ := require (forallb (free_of (rd_name d)) (rd_params d ++ rd_indices d)) ESelfReference in
-  let* cs := mapM (classify_ctor (rd_name d) p q bypass) (rd_ctors d) in
+  let* cs := mapM (classify_ctor (rd_name d) p q mode) (rd_ctors d) in
   let* _ := match first_duplicate (map ctor_name cs) with
             | Some c => Err (EDuplicateCtor c)
             | None => Ok tt
@@ -215,7 +196,7 @@ Definition classify_decl_with (bypass : bool) (d : raw_decl) : result decl_error
   Ok {| ind_name := rd_name d; ind_params := rd_params d; ind_indices := rd_indices d;
         ind_level := rd_level d; ind_ctors := cs |}.
 
-Definition classify_decl : raw_decl -> result decl_error ind_desc := classify_decl_with false.
+Definition classify_decl : raw_decl -> result decl_error ind_desc := classify_decl_with Checked.
 
 (** ** Faithfulness *)
 
@@ -223,12 +204,6 @@ Lemma apps_spine : forall t, apps (spine_head t) (spine_args t) = t.
 Proof.
   induction t; try reflexivity.
   cbn [spine_head spine_args]. unfold apps in *. rewrite fold_left_app. cbn. now rewrite IHt1.
-Qed.
-
-Lemma pis_split : forall t As H, split_pis t = (As, H) -> pis As H = t.
-Proof.
-  induction t; intros As H E; cbn in E; try (injection E as <- <-; reflexivity).
-  destruct (split_pis t2) as [As' H'] eqn:E2. injection E as <- <-. cbn. f_equal. now apply IHt2.
 Qed.
 
 Lemma pis_app : forall As Bs t, pis (As ++ Bs) t = pis As (pis Bs t).
@@ -255,10 +230,10 @@ Qed.
 Section Rebuild.
   Variable D : string.
   Variables p q : nat.
-  Variable bypass : bool.
+  Variable mode : positivity.
 
   Lemma classify_field_rebuilds : forall c l A fd,
-    classify_field D p q bypass c l A = Ok fd -> field_type D p l fd = A.
+    classify_field D p q mode c l A = Ok fd -> field_type D p l fd = A.
   Proof.
     intros c l A fd H. unfold classify_field in H.
     destruct (free_of D A); [injection H as <-; reflexivity | ].
@@ -268,11 +243,11 @@ Section Rebuild.
       destruct (family_args_ok _ _ _ _ _ _ _ _ Hv) as [Ea _].
       cbn [field_type]. rewrite <- Ea, <- (family_spine_head _ _ Ef), apps_spine.
       now apply pis_split.
-    - destruct bypass; [injection H as <-; reflexivity | discriminate H].
+    - destruct mode; [discriminate H | injection H as <-; reflexivity].
   Qed.
 
   Lemma classify_con_rebuilds : forall c t l fs us,
-    classify_con D p q bypass c l t = Ok (fs, us) ->
+    classify_con D p q mode c l t = Ok (fs, us) ->
     pis (field_types D p l fs) (apps (Const (Ind D)) (vars (l + length fs) p ++ us)) = t.
   Proof.
     intros c t. induction t; intros l fs us H; cbn [classify_con] in H.
@@ -301,14 +276,14 @@ Proof.
 Qed.
 
 (** The types rebuilt from the description are the declared ones. *)
-Theorem classify_decl_faithful : forall bypass d desc,
-  classify_decl_with bypass d = Ok desc ->
+Theorem classify_decl_faithful : forall mode d desc,
+  classify_decl_with mode d = Ok desc ->
   ind_name desc = rd_name d /\
   ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (Univ (rd_level d))) /\
   Forall2 (fun rc cd => ctor_name cd = rc_name rc /\ ctor_type desc cd = pis (rd_params d) (rc_type rc))
     (rd_ctors d) (ind_ctors desc).
 Proof.
-  intros bypass d desc H. unfold classify_decl_with in H.
+  intros mode d desc H. unfold classify_decl_with in H.
   bind_in H u1 H1. bind_in H u2 H2. bind_in H u3 H3. bind_in H cs Hcs. bind_in H u4 H4.
   clear H1 H2 H3 H4.
   injection H as <-. split; [reflexivity | split; [reflexivity | ]]. cbn [ind_ctors].
@@ -335,7 +310,7 @@ Definition desc_free (d : ind_desc) : bool :=
     (ind_ctors d).
 
 Lemma classify_field_free : forall D p q c l A fd,
-  classify_field D p q false c l A = Ok fd -> field_free D fd = true.
+  classify_field D p q Checked c l A = Ok fd -> field_free D fd = true.
 Proof.
   intros D p q c l A fd H. unfold classify_field in H.
   destruct (free_of D A) eqn:EA; [injection H as <-; exact EA | ].
@@ -346,7 +321,7 @@ Proof.
 Qed.
 
 Lemma classify_con_free : forall D p q c t l fs us,
-  classify_con D p q false c l t = Ok (fs, us) ->
+  classify_con D p q Checked c l t = Ok (fs, us) ->
   forallb (field_free D) fs && forallb (free_of D) us = true.
 Proof.
   intros D p q c t. induction t; intros l fs us H; cbn [classify_con] in H.

@@ -64,6 +64,7 @@ Local Open Scope string_scope.
 Local Open Scope list_scope.
 From DepTypes.Common Require Import Result Traced.
 From DepTypes.PTS Require Import Syntax Spec Signature Eval Check.
+From IndTypes Require Import Registration Telescope.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Recursion Require Import Below CaseTree.
 
@@ -204,7 +205,7 @@ Section Calls.
     | Pair a b => let* a' := sub d a in let* b' := sub d b in Ok (Done (Pair a' b'))
     | Fst u => let* u' := sub d u in Ok (Done (Fst u'))
     | Snd u => let* u' := sub d u in Ok (Done (Snd u'))
-    | _ => Ok (Done t)
+    | Srt _ | Var _ | Void | Unit | Tt | Bool | BTrue | BFalse | Const _ => Ok (Done t)
     end.
 
   Definition calls (t : term) : result case_error term := let* r := calls_in 0 t in done 0 r.
@@ -309,54 +310,71 @@ Section Compile.
     | _ => let! _ := temit (AtEquation f i, []) in refuse (REquation f i lhs rhs)
     end.
 
+  (** The direct translation, in the scope [G] of the arguments with the
+      goal [goal] and their values [env]: the tree splits the structural
+      argument at its root, and a call is the hypothesis of a field.  The
+      signature, the body in that scope, the instances of eliminators it
+      uses, and the elaborated tree. *)
+  Definition compile_direct (sg : signature) (fn : fun_decl) (rc : recursion)
+      (G : scope) (goal : term) (env : list term) : R (signature * term * list (string * nat) * elab) :=
+    let x := fn_struct fn in
+    let! _ := match fn_tree fn with
+              | Split y _ => if String.eqb y x then tret tt else refuse (RCase (CRoot x))
+              | Leaf _ => refuse (RCase (CRoot x))
+              end in
+    let! e := case (elaborate_with sg (varying fn) (fun k => Aux (S k)) G goal env (fn_tree fn)) in
+    let! t := translate Sp fuel sg rc e in
+    tret (sg, fst t, snd t, e).
+
+  (** The translation through the history, the root split [si] of the
+      scope [G] (its goal is that of [si]): the motive of the structural
+      argument at its level, the history of its family registered for it,
+      and [recBelow_D] applied to the step, the tree elaborated with the
+      table [Below_D] as [Aux 0]. *)
+  Definition compile_history (sg : signature) (fn : fun_decl) (rc : recursion) (si : split_info)
+      (G : scope) (env : list term) : R (signature * term * list (string * nat) * elab) :=
+    let sv := si_var si in
+    let gn := si_gen si in
+    let D := ind_name (sv_desc sv) in
+    let params := sv_params sv in
+    let q := length (sv_indices sv) in
+    let! j := motive_level Sp fuel sg rc G (fn_struct fn) gn in
+    let! sg1 := ensure_below Sp fuel sg D j in
+    let P := motive gn in
+    let seeds := map (fun '(l, A) => mk_binder (match at_level G l with Some b => b_tag b | None => Anon end) A)
+                   (combine (gn_seeds gn) (gn_seed_types gn)) in
+    let table := apps (Const (Def (below_name D j)))
+                   (map (lift (S q)) params ++ [lift (S q) P] ++ vars 0 (S q)) in
+    let '(G1, goal1, sb) := introduce G gn (mk_binder (Aux 0) table :: rev seeds) (vars 1 (S q)) in
+    let! e := case (elaborate sg1 G1 goal1 (map (subst sb) env) (fn_tree fn)) in
+    let! t := translate Sp fuel sg1 rc e in
+    let step := lams (S q) (Lam (lams (length (gn_tail gn)) (fst t))) in
+    tret (sg1,
+          apps (Const (Def (recbelow_name D j)))
+            (params ++ [P; step] ++ map (var_at (length G)) (gn_seeds gn ++ gn_tail gn)),
+          snd t, e).
+
   (** The translation: the signature with the history and the instances
       it needs, the type of the function, its body, and what [out] reads
       off the elaborated tree. *)
   Definition compile_with {X} (out : elab -> X) (sg : signature) (fn : fun_decl)
     : R (signature * term * term * X) :=
-    let f := fn_name fn in
     let x := fn_struct fn in
     let! s0 := case (start fn) in
     let '(G0, goal0, env0) := s0 in
     let! si := case (prepare_split sg G0 goal0 x (varying fn)) in
     let sv := si_var si in
     let gn := si_gen si in
-    let d := sv_desc sv in
-    let params := sv_params sv in
-    let θ := sv_indices sv in
     let! _ := match sv_prim sv with Some pr => refuse (RCase (CNotFamily x (prim_type pr))) | None => tret tt end in
     let N := length G0 in
-    let rc := {| rec_name := f; rec_arity := N; rec_struct := sv_level sv;
-                 rec_params := length (ind_params d); rec_indices := θ; rec_tail := gn_tail gn;
-                 rec_names := map (fun '(y, _, _) => y) (fn_args fn); rec_strategy := fn_strategy fn |} in
-    let D := ind_name d in
+    let rc := {| rec_name := fn_name fn; rec_arity := N; rec_struct := sv_level sv;
+                 rec_params := length (ind_params (sv_desc sv)); rec_indices := sv_indices sv;
+                 rec_tail := gn_tail gn; rec_names := map (fun '(y, _, _) => y) (fn_args fn);
+                 rec_strategy := fn_strategy fn |} in
     let! r := match fn_strategy fn with
-      | Direct =>
-          let! _ := match fn_tree fn with
-                    | Split y _ => if String.eqb y x then tret tt else refuse (RCase (CRoot x))
-                    | Leaf _ => refuse (RCase (CRoot x))
-                    end in
-          let! e := case (elaborate_with sg (varying fn) (fun k => Aux (S k)) G0 goal0 env0 (fn_tree fn)) in
-          let! t := translate Sp fuel sg rc e in
-          tret (sg, fst t, snd t, e)
-      | History =>
-          let q := length θ in
-          let! j := motive_level Sp fuel sg rc G0 x gn in
-          let! sg1 := ensure_below Sp fuel sg D j in
-          let P := motive gn in
-          let seeds := map (fun '(l, A) => mk_binder (match at_level G0 l with Some b => b_tag b | None => Anon end) A)
-                         (combine (gn_seeds gn) (gn_seed_types gn)) in
-          let table := apps (Const (Def (below_name D j)))
-                         (map (lift (S q)) params ++ [lift (S q) P] ++ vars 0 (S q)) in
-          let '(G1, goal1, sb) := introduce G0 gn (seeds ++ [mk_binder (Aux 0) table]) (vars 1 (S q)) in
-          let! e := case (elaborate sg1 G1 goal1 (map (subst sb) env0) (fn_tree fn)) in
-          let! t := translate Sp fuel sg1 rc e in
-          let step := lams (S q) (Lam (lams (length (gn_tail gn)) (fst t))) in
-          tret (sg1,
-                apps (Const (Def (recbelow_name D j)))
-                  (params ++ [P; step] ++ map (var_at N) (gn_seeds gn ++ gn_tail gn)),
-                snd t, e)
-      end in
+              | Direct => compile_direct sg fn rc G0 goal0 env0
+              | History => compile_history sg fn rc si G0 env0
+              end in
     let '(sg1, root, needed, e) := r in
     let! _ := if splits_struct e then tret tt else refuse (RCase (CUnsplit x)) in
     let! sg2 := tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D k) sg1 needed in
@@ -449,6 +467,26 @@ Section Sound.
       apply IH in H as [es E]. exists (es ++ es1). now rewrite E, E1, app_assoc.
   Qed.
 
+  Lemma compile_direct_extends : forall sg fn rc G goal env log log' sg1 root needed e,
+    compile_direct Sp fuel sg fn rc G goal env log = (log', Ok (sg1, root, needed, e)) ->
+    exists es, sig_entries sg1 = es ++ sig_entries sg.
+  Proof.
+    intros sg fn rc G goal env log log' sg1 root needed e H. unfold compile_direct in H.
+    tbind_in H u Hu. tbind_in H e' He. tbind_in H t Ht.
+    apply tret_ok in H. injection H as <- _ _ _. now exists [].
+  Qed.
+
+  Lemma compile_history_extends : forall sg fn rc si G env log log' sg1 root needed e,
+    compile_history Sp fuel sg fn rc si G env log = (log', Ok (sg1, root, needed, e)) ->
+    exists es, sig_entries sg1 = es ++ sig_entries sg.
+  Proof.
+    intros sg fn rc si G env log log' sg1 root needed e H. unfold compile_history in H.
+    tbind_in H j Hj. tbind_in H sg1' H1. apply ensure_below_extends in H1 as [es1 E1].
+    match type of H with context [introduce ?G ?gn ?B ?vs] => destruct (introduce G gn B vs) as [[G1 goal1] sb] end.
+    tbind_in H e' He. tbind_in H t Ht.
+    apply tret_ok in H. injection H as <- _ _ _. now exists es1.
+  Qed.
+
   Lemma compile_term_extends : forall sg fn log log' sg0 A b eqs,
     compile_term Sp fuel sg fn log = (log', Ok (sg0, A, b, eqs)) ->
     exists es, sig_entries sg0 = es ++ sig_entries sg.
@@ -462,13 +500,7 @@ Section Sound.
     tbind_in H sg2 H2. apply tret_ok in H. injection H as <- _ _ _.
     apply instances_extend in H2 as [es2 E2].
     assert (exists es, sig_entries sg1 = es ++ sig_entries sg) as [es1 E1].
-    { destruct (fn_strategy fn).
-      - tbind_in Hr u Hu. tbind_in Hr e' He. tbind_in Hr t Ht.
-        apply tret_ok in Hr. injection Hr as <- _ _ _. now exists [].
-      - tbind_in Hr j Hj. tbind_in Hr sg1' H1. apply ensure_below_extends in H1 as [es1 E1].
-        match type of Hr with context [introduce ?G ?gn ?B ?vs] => destruct (introduce G gn B vs) as [[G1 goal1] sb] end.
-        tbind_in Hr e' He. tbind_in Hr t Ht.
-        apply tret_ok in Hr. injection Hr as <- _ _ _. now exists es1. }
+    { destruct (fn_strategy fn); [eapply compile_direct_extends | eapply compile_history_extends]; exact Hr. }
     exists (es2 ++ es1). now rewrite E2, E1, app_assoc.
   Qed.
 

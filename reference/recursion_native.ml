@@ -5,58 +5,32 @@
    from the lecture; the differential test compares it with the extract.
 
    Indices and levels are natural numbers in Rocq, where subtraction
-   stops at 0; [-!] does the same here. *)
+   stops at 0, and a missing element of a list has a default.  [-!],
+   [nth_or] and the truncating [combine] do the same where a term or a
+   description given as input, or the caller of an exported function,
+   decides the bound; where the code itself guarantees it, the
+   subtraction is plain and a lookup that cannot miss raises. *)
 
 open Pts_native
+open Telescope_native
+open Method_layout_native
+open Common_native
 open Diagnostics_native
 module E = Elim_native
+module Reg = Registration_native
 module L = Looping
 
-let ( let* ) = Result.bind
-let require ok error = if ok then Ok () else Error error
 let ( -! ) a b = max 0 (a - b)
 
-let rec map_ok f = function
-  | [] -> Ok []
-  | x :: xs -> let* y = f x in let* ys = map_ok f xs in Ok (y :: ys)
-
-let rec iter_ok f = function
-  | [] -> Ok ()
-  | x :: xs -> let* () = f x in iter_ok f xs
-
-let rec fold_ok f acc = function
-  | [] -> Ok acc
-  | x :: xs -> let* acc = f acc x in fold_ok f acc xs
-
+(* Rocq's [combine]: the pairs up to the shorter list. *)
 let rec combine xs ys = match xs, ys with x :: xs, y :: ys -> (x, y) :: combine xs ys | _ -> []
 
-let rec first_duplicate = function
-  | [] -> None
-  | x :: rest -> if List.mem x rest then Some x else first_duplicate rest
+(* Rocq's [nth i l default]. *)
+let nth_or default l i = Option.value (List.nth_opt l i) ~default
 
 (* ** Terms *)
 
-let rename r t = subst (fun n -> Var (r n)) t
-let up_ren r n = if n = 0 then 0 else r (n - 1) + 1
-let rec upn_ren m r = if m = 0 then r else up_ren (upn_ren (m - 1) r)
-
-let rec rename_tele r = function
-  | [] -> []
-  | a :: rest -> rename r a :: rename_tele (up_ren r) rest
-
-let up_sub sb n = if n = 0 then Var 0 else lift 1 (sb (n - 1))
-let rec upn_sub m sb = if m = 0 then sb else up_sub (upn_sub (m - 1) sb)
-
-let rec subst_tele sb = function
-  | [] -> []
-  | a :: rest -> subst sb a :: subst_tele (up_sub sb) rest
-
-let rec lams n t = if n = 0 then t else Lam (lams (n - 1) t)
 let times a b = Sigma (a, lift 1 b)
-
-let rec split_pis = function
-  | Pi (a, b) -> let domains, body = split_pis b in (a :: domains, body)
-  | t -> ([], t)
 
 (* Whether the variable [i] occurs free. *)
 let rec occurs i = function
@@ -78,27 +52,6 @@ let recbelow_name d j = "recBelow_" ^ d ^ "_" ^ string_of_int j
 (* The level of the history of D for a motive in [Type_j]. *)
 let history_level d j = max d.ind_level j
 
-(* As the transport of Elim_native, with [g] binders between the
-   parameters and those of the method. *)
-let transport_past g rbs b n =
-  match List.nth_opt rbs n with
-  | Some bl -> b -! 1 -! bl
-  | None -> (n -! List.length rbs) + (b + g)
-
-(* A recursive field among the binders of a method: its position, the
-   positions of the earlier fields, innermost first, its domains and
-   indices; its hypothesis follows it. *)
-type rec_binder = { rb_pos : int; rb_before : int list; rb_domains : term list; rb_indices : term list }
-
-(* The positions of all the fields, the number of binders and the
-   recursive fields. *)
-let rec method_binders rbs b = function
-  | [] -> (rbs, b, [])
-  | FArg _ :: fs -> method_binders (b :: rbs) (b + 1) fs
-  | FRec (domains, indices) :: fs ->
-      let rbs', b', rs = method_binders (b :: rbs) (b + 2) fs in
-      (rbs', b', { rb_pos = b; rb_before = rbs; rb_domains = domains; rb_indices = indices } :: rs)
-
 (* Tuples at the level ℓ: [Unit_ℓ] when empty, a single component alone,
    more nested to the right. *)
 let rec tuple_type l = function
@@ -111,91 +64,100 @@ let rec tuple l = function
   | [ t ] -> t
   | t :: rest -> Pair (t, tuple l rest)
 
-(* The name, the numbers of parameters and indices, and the level of the
-   history of (D, j). *)
-let dims d j = (d.ind_name, List.length d.ind_params, List.length d.ind_indices, history_level d j)
-
 (* [Πθ̄. Πx:D Δ θ̄. F], [e] binders between the parameters and θ̄. *)
 let over_family d e f =
-  let name, p, q, _ = dims d 0 in
+  let p = nparams d and q = nindices d in
   pis (rename_tele (fun n -> n + e) d.ind_indices)
-    (Pi (apps (Const (Ind name)) (vars (q + e) p @ vars 0 q), f))
+    (Pi (apps (Const (Ind d.ind_name)) (vars (q + e) p @ vars 0 q), f))
 
-(* [P θ̄ x] and [Below_D Δ P θ̄ x], with θ̄ x at [base]. *)
-let motive_at_base d pv base = apps (Var pv) (vars base (List.length d.ind_indices + 1))
+(* [P θ̄ x] and [Below_D Δ P θ̄ x]: the parameters at [params], P at
+   [motive] and θ̄ x at [base]. *)
+let motive_at_base d ~motive ~base = apps (Var motive) (vars base (nindices d + 1))
 
-let below_at d j params pv base =
-  let name, p, q, _ = dims d j in
-  apps (Const (Def (below_name name j))) (vars params p @ [ Var pv ] @ vars base (q + 1))
+let below_at d j ~params ~motive ~base =
+  apps (Const (Def (below_name d.ind_name j)))
+    (vars params (nparams d) @ [ Var motive ] @ vars base (nindices d + 1))
 
 (* [Π(Δ). ΠP:(Πθ̄. D Δ θ̄ → Type_j). Πθ̄. D Δ θ̄ → Type_ℓ]. *)
 let below_type d j =
-  let _, _, _, l = dims d j in
-  pis d.ind_params (Pi (E.motive_type d j, over_family d 1 (Srt (Univ l))))
+  pis d.ind_params (Pi (E.motive_type d j, over_family d 1 (Srt (Univ (history_level d j)))))
 
-(* [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ] for a recursive field [r] with its
-   hypothesis [ih], among [b] binders after the parameters and P. *)
-let component b rb =
-  let m = List.length rb.rb_domains in
-  let r = transport_past 1 rb.rb_before b in
-  pis (rename_tele r rb.rb_domains)
+(* [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ] for a recursive field [r] at [bl], after the
+   earlier fields at [rbs], with its hypothesis [ih], among [b] binders
+   after the parameters and P. *)
+let component b bl rbs domains indices =
+  let m = List.length domains in
+  let r = transport rbs b in
+  pis (rename_tele r domains)
     (times
        (apps (Var (b + m))
-          (List.map (rename (upn_ren m r)) rb.rb_indices
-           @ [ apps (Var ((b -! 1 -! rb.rb_pos) + m)) (vars 0 m) ]))
-       (apps (Var ((b -! 2 -! rb.rb_pos) + m)) (vars 0 m)))
+          (List.map (rename (upn_ren m r)) indices @ [ apps (Var (b - 1 - bl + m)) (vars 0 m) ]))
+       (apps (Var (b - 2 - bl + m)) (vars 0 m)))
 
+(* The tuple of the components, built in the accumulator innermost
+   first. *)
 let below_method l c =
-  let _, b, rs = method_binders [] 0 c.ctor_fields in
-  lams b (tuple_type l (List.map (component b) rs))
+  let b = nbinders c.ctor_fields in
+  let cs, _, _ =
+    fold_slots (fun cs fd _ _ bl rbs ->
+        match fd with
+        | FRec (domains, indices) -> component b bl rbs domains indices :: cs
+        | FArg _ -> cs)
+      [] c.ctor_fields
+  in
+  lams b (tuple_type l (List.rev cs))
 
 (* [λΔ P. elim_D[ℓ+1] Δ (λθ̄ x. Type_ℓ) m̄]. *)
 let below_body d j =
-  let name, p, q, l = dims d j in
-  lams p (Lam (apps (Const (Elim (name, l + 1)))
+  let p = nparams d and q = nindices d and l = history_level d j in
+  lams p (Lam (apps (Const (Elim (d.ind_name, l + 1)))
                  (vars 1 p @ [ lams (q + 1) (Srt (Univ l)) ] @ List.map (below_method l) d.ind_ctors)))
+
+(* [P θ̄ x × Below_D Δ P θ̄ x], after P, step, θ̄ and x. *)
+let motive_and_below d j =
+  let q = nindices d in
+  times (motive_at_base d ~motive:(q + 2) ~base:0) (below_at d j ~params:(q + 3) ~motive:(q + 2) ~base:0)
 
 (* [step : Πθ̄. Πx. Below_D Δ P θ̄ x → P θ̄ x], after P. *)
 let step_type d j =
-  let q = List.length d.ind_indices in
-  over_family d 1 (Pi (below_at d j (q + 2) (q + 1) 0, motive_at_base d (q + 2) 1))
+  let q = nindices d in
+  over_family d 1
+    (Pi (below_at d j ~params:(q + 2) ~motive:(q + 1) ~base:0, motive_at_base d ~motive:(q + 2) ~base:1))
 
 (* [Π(Δ). ΠP. Πstep. Πθ̄. Πx. P θ̄ x × Below_D Δ P θ̄ x]. *)
 let build_type d j =
-  let q = List.length d.ind_indices in
-  pis d.ind_params
-    (Pi (E.motive_type d j,
-         Pi (step_type d j,
-             over_family d 2 (times (motive_at_base d (q + 2) 0) (below_at d j (q + 3) (q + 2) 0)))))
+  pis d.ind_params (Pi (E.motive_type d j, Pi (step_type d j, over_family d 2 (motive_and_below d j))))
 
 (* [Π(Δ). ΠP. Πstep. Πθ̄. Πx. P θ̄ x]. *)
 let recbelow_type d j =
-  let q = List.length d.ind_indices in
-  pis d.ind_params (Pi (E.motive_type d j, Pi (step_type d j, over_family d 2 (motive_at_base d (q + 2) 0))))
+  let q = nindices d in
+  pis d.ind_params
+    (Pi (E.motive_type d j, Pi (step_type d j, over_family d 2 (motive_at_base d ~motive:(q + 2) ~base:0))))
 
 (* On [c Δ ā] with the tuple [h] of the hypotheses: [(step ū (c Δ ā) h, h)];
    [step] lies right before the binders of the method. *)
 let build_method d l c =
-  let name, p, _, _ = dims d 0 in
-  let rbs, b, rs = method_binders [] 0 c.ctor_fields in
-  let h = tuple l (List.map (fun rb -> Var (b -! 2 -! rb.rb_pos)) rs) in
-  let obj = apps (Const (Ctor (name, c.ctor_name)))
-      (vars (b + 2) p @ List.map (fun bl -> Var (b -! 1 -! bl)) (List.rev rbs)) in
+  let b = nbinders c.ctor_fields in
+  let hs, rbs, _ =
+    fold_slots (fun hs fd _ _ bl _ -> match fd with FRec _ -> Var (b - 2 - bl) :: hs | FArg _ -> hs)
+      [] c.ctor_fields
+  in
+  let h = tuple l (List.rev hs) in
+  let obj = apps (Const (Ctor (d.ind_name, c.ctor_name))) (vars (b + 2) (nparams d) @ field_vars rbs b) in
   lams b (Pair (apps (Var b) (List.map (rename (transport_past 2 rbs b)) c.ctor_indices @ [ obj; h ]), h))
 
 (* [λΔ P step. elim_D[ℓ] Δ (λθ̄ x. P θ̄ x × Below_D Δ P θ̄ x) m̄]. *)
 let build_body d j =
-  let name, p, q, l = dims d j in
-  lams p (Lam (Lam (apps (Const (Elim (name, l)))
-                      (vars 2 p
-                       @ [ lams (q + 1) (times (motive_at_base d (q + 2) 0) (below_at d j (q + 3) (q + 2) 0)) ]
+  let p = nparams d and q = nindices d and l = history_level d j in
+  lams p (Lam (Lam (apps (Const (Elim (d.ind_name, l)))
+                      (vars 2 p @ [ lams (q + 1) (motive_and_below d j) ]
                        @ List.map (build_method d l) d.ind_ctors))))
 
 (* [λΔ P step θ̄ x. fst (build_D Δ P step θ̄ x)]. *)
 let recbelow_body d j =
-  let name, p, q, _ = dims d j in
+  let p = nparams d and q = nindices d in
   lams (p + 2 + q + 1)
-    (Fst (apps (Const (Def (build_name name j)))
+    (Fst (apps (Const (Def (build_name d.ind_name j)))
             (vars (q + 3) p @ [ Var (q + 2); Var (q + 1) ] @ vars 0 (q + 1))))
 
 (* The three δ-constants of (D, j) with [Unit_ℓ], [elim_D[ℓ+1]] and
@@ -204,14 +166,14 @@ let ensure_below r sg name j =
   match find_def sg (recbelow_name name j) with
   | Some _ -> Ok sg
   | None ->
-      let* d = match find_ind sg name with Some d -> Ok d | None -> E.refuse (RUndeclared name) in
+      let* d = match find_ind sg name with Some d -> Ok d | None -> Reg.refuse (RUndeclared name) in
       let l = history_level d j in
-      let* sg1 = E.ensure_unit r sg l in
-      let* sg2 = E.ensure_elim r sg1 name (l + 1) in
-      let* sg3 = E.ensure_elim r sg2 name l in
-      let* sg4 = E.define r sg3 (below_name name j) (below_type d j) (below_body d j) in
-      let* sg5 = E.define r sg4 (build_name name j) (build_type d j) (build_body d j) in
-      E.define r sg5 (recbelow_name name j) (recbelow_type d j) (recbelow_body d j)
+      let* sg = E.ensure_unit r sg l in
+      let* sg = E.ensure_elim r sg name (l + 1) in
+      let* sg = E.ensure_elim r sg name l in
+      let* sg = Reg.define r sg (below_name name j) (below_type d j) (below_body d j) in
+      let* sg = Reg.define r sg (build_name name j) (build_type d j) (build_body d j) in
+      Reg.define r sg (recbelow_name name j) (recbelow_type d j) (recbelow_body d j)
 
 (* ** Case trees *)
 
@@ -259,8 +221,9 @@ let resolve_in g t =
 let rec lookup_user x = function
   | [] -> None
   | b :: g ->
-      let further = Option.map (fun (v, p, a) -> (v + 1, p, a)) (lookup_user x g) in
-      (match b.b_tag with User (y, p) when y = x -> Some (0, p, b.b_type) | _ -> further)
+      (match b.b_tag with
+       | User (y, p) when y = x -> Some (0, p, b.b_type)
+       | _ -> Option.map (fun (v, p, a) -> (v + 1, p, a)) (lookup_user x g))
 
 let rec find_aux k = function
   | [] -> None
@@ -269,37 +232,47 @@ let rec find_aux k = function
        | Aux k' when k' = k -> Some 0
        | _ -> Option.map succ (find_aux k g))
 
-(* By levels, from the outermost binder. *)
+(* By levels, from the outermost binder.  [generalize] takes its seeds
+   from its caller: as in Rocq, a level outside the scope has the type
+   [Void] and the name [_].  The tails and the seeds of the splits are
+   levels of the scope, which [level] takes. *)
 let at_level g l = List.nth_opt (List.rev g) l
+let level g l = List.nth (List.rev g) l
 let level_type g l = match at_level g l with Some b -> b.b_type | None -> Void
 let level_name g l = match at_level g l with Some { b_tag = User (x, _); _ } -> x | _ -> "_"
 
 (* Whether [a], in a context of [l] binders, mentions the binder at level [m]. *)
-let mentions_level l a m = m < l && occurs (l -! 1 -! m) a
+let mentions_level l a m = m < l && occurs (l - 1 - m) a
 
 (* ** Generalization *)
 
 let anonymous b = b.b_tag = Anon
 
-(* The binders a split generalizes beyond the seeds: those in [extra],
-   and those whose types mention a seed or one already in the tail; by
-   levels, outermost first.  A binder without a name stays.  [acc_rev]
-   is the tail so far, in reverse. *)
-let rec tail_from l bs ss extra acc_rev =
-  match bs with
-  | [] -> List.rev acc_rev
-  | b :: bs' ->
-      let mentions = mentions_level l b.b_type in
-      let joins = (not (anonymous b)) && (not (List.mem l ss))
-                  && (List.mem l extra || List.exists mentions ss || List.exists mentions acc_rev) in
-      tail_from (l + 1) bs' ss extra (if joins then l :: acc_rev else acc_rev)
+(* The binders of [g] a split generalizes beyond the seeds [ss]: those in
+   [extra], and those whose types mention a seed or one already in the
+   tail; by levels, outermost first.  A binder without a name stays. *)
+let split_tail g ss extra =
+  (* [tail_from] of CaseTree.v: from the binders [bs] at the level [l]
+     on; [acc_rev] is the tail so far, in reverse. *)
+  let rec go l bs acc_rev =
+    match bs with
+    | [] -> List.rev acc_rev
+    | b :: bs' ->
+        let mentions = mentions_level l b.b_type in
+        let joins = (not (anonymous b)) && (not (List.mem l ss))
+                    && (List.mem l extra || List.exists mentions ss || List.exists mentions acc_rev) in
+        go (l + 1) bs' (if joins then l :: acc_rev else acc_rev)
+  in
+  go 0 (List.rev g) []
 
 let moved n ss tail l =
   match position l ss with
   | Some i -> n + i
   | None -> (match position l tail with Some k -> n + List.length ss + k | None -> l)
 
-let relevel f l n a = rename (fun v -> n -! 1 -! f (l -! 1 -! v)) a
+(* [a], in a context of [from] binders, in one of [into] binders, where
+   the binder at level [v] moves to the level [f v]. *)
+let relevel f ~from:l ~into:n a = rename (fun v -> n -! 1 -! f (l -! 1 -! v)) a
 
 type generalized = {
   gn_seeds : int list;
@@ -309,55 +282,64 @@ type generalized = {
   gn_goal : term;
 }
 
-let generalize g goal ss extra =
+(* Over the seeds [ss] with the tail [tail] of the split; the seeds must
+   not depend on the tail. *)
+let generalize_with g goal ss tail =
   let n = List.length g in
-  let tail = tail_from 0 (List.rev g) ss extra [] in
   let* () = iter_ok (fun s ->
       match List.find_opt (mentions_level s (level_type g s)) tail with
       | Some t -> Error (CGeneralize (level_name g s, level_name g t))
       | None -> Ok ()) ss in
-  let mv = moved n ss tail in
+  let mv = moved n ss tail and ns = List.length ss in
   Ok { gn_seeds = ss; gn_tail = tail;
-       gn_seed_types = List.mapi (fun i s -> relevel mv s (n + i) (level_type g s)) ss;
-       gn_tail_types = List.mapi (fun k t -> relevel mv t (n + List.length ss + k) (level_type g t)) tail;
-       gn_goal = relevel mv n (n + List.length ss + List.length tail) goal }
+       gn_seed_types = List.mapi (fun i s -> relevel mv ~from:s ~into:(n + i) (level_type g s)) ss;
+       gn_tail_types = List.mapi (fun k t -> relevel mv ~from:t ~into:(n + ns + k) (level_type g t)) tail;
+       gn_goal = relevel mv ~from:n ~into:(n + ns + List.length tail) goal }
+
+(* With [extra] in the tail. *)
+let generalize g goal ss extra = generalize_with g goal ss (split_tail g ss extra)
 
 (* [λθ̄ z. Π(tail). T]. *)
 let motive gn = lams (List.length gn.gn_seeds) (pis gn.gn_tail_types gn.gn_goal)
 
-(* From after the scope, the seeds and [k] binders of the tail, into the
-   scope with [b] binders after it and the [k] binders, the seeds
-   standing for [values]. *)
-let instantiate n s b k values a =
+(* From after the [scope] binders of the scope, the [seeds] binders of
+   the seeds and [tail] binders of the tail, into the scope with
+   [binders] binders after it and the same [tail] binders; the seeds
+   stand for [values]. *)
+let instantiate ~scope:n ~seeds:s ~binders:b ~tail:k values a =
   subst (fun v ->
       let l = (n + s + k) -! 1 -! v in
-      if l < n then Var ((v + b) -! s)
-      else if l < n + s then lift k (Option.value (List.nth_opt values (l -! n)) ~default:(Var 0))
+      if l < n then Var (v + b - s)
+      else if l < n + s then lift k (nth_or (Var 0) values (l - n))
       else Var v) a
 
-let motive_at n gn b values = instantiate n (List.length gn.gn_seeds) b 0 values (pis gn.gn_tail_types gn.gn_goal)
+(* [Π(tail). T] after [binders] binders after the scope, the seeds
+   standing for [values]. *)
+let motive_at ~scope gn ~binders values =
+  instantiate ~scope ~seeds:(List.length gn.gn_seeds) ~binders ~tail:0 values
+    (pis gn.gn_tail_types gn.gn_goal)
 
-(* The scope after the binders [bs], the seeds standing for [values] and
-   the tail bound again; its goal; the substitution from the old scope. *)
+(* The scope after the binders [bs], innermost first, the seeds standing
+   for [values] and the tail bound again; its goal; the substitution from
+   the old scope. *)
 let introduce g gn bs values =
   let n = List.length g and s = List.length gn.gn_seeds and b = List.length bs in
   let nt = List.length gn.gn_tail in
-  let inst k = instantiate n s b k values in
+  let inst k = instantiate ~scope:n ~seeds:s ~binders:b ~tail:k values in
   let tail = List.mapi (fun k (t, a) ->
-      let tg = match at_level g t with Some bd -> bd.b_tag | None -> Anon in
-      { b_tag = tg; b_type = inst k a }) (combine gn.gn_tail gn.gn_tail_types) in
+      { b_tag = (level g t).b_tag; b_type = inst k a }) (List.combine gn.gn_tail gn.gn_tail_types) in
   let gone = gn.gn_seeds @ gn.gn_tail in
-  let old = List.mapi (fun v bd -> if List.mem (n -! 1 -! v) gone then { bd with b_tag = Anon } else bd) g in
+  let old = List.mapi (fun v bd -> if List.mem (n - 1 - v) gone then { bd with b_tag = Anon } else bd) g in
   let sb v =
     let l = n -! 1 -! v in
     match position l gn.gn_seeds with
-    | Some i -> lift nt (Option.value (List.nth_opt values i) ~default:(Var 0))
+    | Some i -> lift nt (nth_or (Var 0) values i)
     | None ->
         (match position l gn.gn_tail with
-         | Some k -> Var (nt -! 1 -! k)
+         | Some k -> Var (nt - 1 - k)
          | None -> Var (v + b + nt))
   in
-  (List.rev tail @ List.rev bs @ old, inst nt gn.gn_goal, sb)
+  (List.rev tail @ bs @ old, inst nt gn.gn_goal, sb)
 
 (* ** Splits *)
 
@@ -366,15 +348,21 @@ type prim = PVoid | PUnit | PBool
 let prim_of = function Void -> Some PVoid | Unit -> Some PUnit | Bool -> Some PBool | _ -> None
 let prim_type = function PVoid -> Void | PUnit -> Unit | PBool -> Bool
 
-let prim_desc pr =
-  let ctor c = { ctor_name = c; ctor_fields = []; ctor_indices = [] } in
-  let desc name ctors = { ind_name = name; ind_params = []; ind_indices = []; ind_level = 0; ind_ctors = ctors } in
-  match pr with
-  | PVoid -> desc "Void" []
-  | PUnit -> desc "Unit" [ ctor "tt" ]
-  | PBool -> desc "Bool" [ ctor "true"; ctor "false" ]
+let prim_name = function PVoid -> "Void" | PUnit -> "Unit" | PBool -> "Bool"
 
-let prim_value c = if c = "tt" then Tt else if c = "true" then BTrue else BFalse
+(* The constructors, each with its value. *)
+let prim_ctors = function
+  | PVoid -> []
+  | PUnit -> [ ("tt", Tt) ]
+  | PBool -> [ ("true", BTrue); ("false", BFalse) ]
+
+let prim_desc pr =
+  { ind_name = prim_name pr; ind_params = []; ind_indices = []; ind_level = 0;
+    ind_ctors = List.map (fun (c, _) -> { ctor_name = c; ctor_fields = []; ctor_indices = [] }) (prim_ctors pr) }
+
+(* The value of the constructor [c] of [pr]: a split asks only for the
+   constructors of [prim_desc pr]. *)
+let prim_value pr c = List.assoc c (prim_ctors pr)
 
 type split_var = {
   sv_name : string;
@@ -386,11 +374,11 @@ type split_var = {
   sv_indices : int list;          (* levels *)
 }
 
-let var_at n l = Var (n -! 1 -! l)
+let var_at n l = Var (n - 1 - l)
 
 let family_of sg g x =
   let* v, p, a = match lookup_user x g with Some r -> Ok r | None -> Error (CUnbound x) in
-  let zl = List.length g -! 1 -! v in
+  let zl = List.length g - 1 - v in
   match prim_of a with
   | Some pr ->
       Ok { sv_name = x; sv_level = zl; sv_path = p; sv_desc = prim_desc pr; sv_prim = Some pr;
@@ -400,44 +388,54 @@ let family_of sg g x =
       let* d = match head with
         | Const (Ind name) -> (match find_ind sg name with Some d -> Ok d | None -> Error (CNotFamily (x, a)))
         | _ -> Error (CNotFamily (x, a)) in
-      let np = List.length d.ind_params in
-      let* () = require (List.length args = np + List.length d.ind_indices) (CNotFamily (x, a)) in
+      let np = nparams d in
+      let* () = require (List.length args = np + nindices d) (CNotFamily (x, a)) in
       let* theta = map_ok (function Var u -> Ok (zl -! 1 -! u) | _ -> Error (CIndices (x, a))) (drop np args) in
       let* () = require (distinct theta) (CIndices (x, a)) in
       Ok { sv_name = x; sv_level = zl; sv_path = p; sv_desc = d; sv_prim = None;
            sv_params = List.map (lift (v + 1)) (take np args); sv_indices = theta }
 
-(* From the context of the parameters and the earlier fields, at [rbs]
-   among [b] binders after the scope. *)
-let field_sub np params rbs b n =
+(* From the context of the [np] parameters [params] (Δ, in the scope) and
+   the earlier fields, at [rbs] among [b] binders after the scope. *)
+let field_sub ~np ~params rbs b n =
   match List.nth_opt rbs n with
-  | Some bl -> Var (b -! 1 -! bl)
-  | None -> lift b (Option.value (List.nth_opt params (np -! 1 -! (n -! List.length rbs))) ~default:(Var 0))
+  | Some bl -> Var (b - 1 - bl)
+  | None -> lift b (nth_or (Var 0) params (np -! 1 -! (n - List.length rbs)))
 
-(* The fields named [xs]: the binders, outermost first, each recursive
-   field followed by its hypothesis [Πȳ:B̄. Π(tail). T] at [v̄] and [r ȳ];
-   the positions of the fields and the number of binders. *)
-let field_binders name np params n gn sub nrec hyp_tag =
-  let rec go xs rbs b k l fs =
-    match fs, xs with
-    | fd :: fs', x :: xs' ->
-        let a = subst (field_sub np params rbs b) (field_type name np l fd) in
-        (match fd with
-         | FArg _ ->
-             let bs, rbs', b' = go xs' (b :: rbs) (b + 1) k (l + 1) fs' in
-             ({ b_tag = User (x, None); b_type = a } :: bs, rbs', b')
-         | FRec (domains, indices) ->
-             let m = List.length domains in
-             let sb = field_sub np params rbs (b + 1) in
-             let h = pis (subst_tele sb domains)
-                 (motive_at n gn (b + 1 + m)
-                    (List.map (subst (upn_sub m sb)) indices @ [ apps (Var m) (vars 0 m) ])) in
-             let p = Option.map (fun p -> p @ [ (k, nrec) ]) sub in
-             let bs, rbs', b' = go xs' (b :: rbs) (b + 2) (k + 1) (l + 1) fs' in
-             ({ b_tag = User (x, p); b_type = a } :: { b_tag = hyp_tag k; b_type = h } :: bs, rbs', b'))
-    | _ -> ([], rbs, b)
+(* The fields [fields] of a constructor of [name], named [xs], as
+   [fold_slots] lays them out after a scope of [scope] binders generalized
+   by [gn]: the binders, innermost first as in a scope, the positions of
+   the fields and the number of binders.  [path] is that of the variable split, whose
+   constructor has [nrec] recursive fields. *)
+let field_binders ~name ~np ~params ~scope ~gn ~path ~nrec ~hyp_tag xs fields =
+  (* The field [fd] named [x] at [l], its binder at [b] after the earlier
+     fields at [rbs] with [k] recursive ones among them, on the binders
+     [bs] before it, innermost first: the field and, after a recursive one
+     [r : Πȳ:B̄. D Δ v̄], its hypothesis [Πȳ:B̄. Π(tail). T] at [v̄] and
+     [r ȳ], tagged by [hyp_tag]. *)
+  let bind_field x bs fd l k b rbs =
+    let a = subst (field_sub ~np ~params rbs b) (field_type name np l fd) in
+    match fd with
+    | FArg _ -> { b_tag = User (x, None); b_type = a } :: bs
+    | FRec (domains, indices) ->
+        let m = List.length domains in
+        let sb = field_sub ~np ~params rbs (b + 1) in
+        let h = pis (subst_tele sb domains)
+            (motive_at ~scope gn ~binders:(b + 1 + m)
+               (List.map (subst (upn_sub m sb)) indices @ [ apps (Var m) (vars 0 m) ])) in
+        let p = Option.map (fun p -> p @ [ (k, nrec) ]) path in
+        { b_tag = hyp_tag k; b_type = h } :: { b_tag = User (x, p); b_type = a } :: bs
   in
-  go
+  (* The names are taken in order, with the binders; a split names every
+     field. *)
+  let (_, bs), rbs, b =
+    fold_slots (fun (xs, bs) fd l k b rbs ->
+        match xs with
+        | x :: xs' -> (xs', bind_field x bs fd l k b rbs)
+        | [] -> invalid_arg "field_binders: a name for each field")
+      (xs, []) fields
+  in
+  (bs, rbs, b)
 
 type split_info = { si_var : split_var; si_gen : generalized }
 
@@ -450,18 +448,21 @@ type branch = {
 }
 
 let count_name c names = List.length (List.filter (( = ) c) names)
-let rec_count c = List.length (List.filter (function FRec _ -> true | FArg _ -> false) c.ctor_fields)
 
 (* The variable with its family and the generalization over its indices
-   and itself; first the parameters must not mention what is generalized. *)
+   and itself, with [extra] in the tail, computed once; first the
+   parameters must not mention what is generalized. *)
 let prepare_split sg g goal x extra =
   let* sv = family_of sg g x in
+  let n = List.length g in
   let ss = sv.sv_indices @ [ sv.sv_level ] in
+  let tail = split_tail g ss extra in
+  let gone = ss @ tail in
   let* () = iter_ok (fun pa ->
-      match List.find_opt (mentions_level (List.length g) pa) (ss @ tail_from 0 (List.rev g) ss extra []) with
+      match List.find_opt (mentions_level n pa) gone with
       | Some t -> Error (CParams (x, level_name g t))
       | None -> Ok ()) sv.sv_params in
-  let* gn = generalize g goal ss extra in
+  let* gn = generalize_with g goal ss tail in
   Ok { si_var = sv; si_gen = gn }
 
 let split_node sg g goal x extra hyp_tag bs =
@@ -473,9 +474,9 @@ let split_node sg g goal x extra hyp_tag bs =
                      && List.for_all (fun c -> count_name c.ctor_name (List.map fst bs) = 1) ctors)
       (CBranches x) in
   let generalized_names = List.map (level_name g) gn.gn_tail in
-  let name = d.ind_name and np = List.length d.ind_params in
+  let name = d.ind_name and np = nparams d in
   let* brs = map_ok (fun c ->
-      let xs = match List.find_opt (fun (c', _) -> c' = c.ctor_name) bs with Some (_, xs) -> xs | None -> [] in
+      let xs = List.assoc c.ctor_name bs in
       let nf = List.length c.ctor_fields in
       let* () = require (List.length xs = nf) (CFields (c.ctor_name, nf)) in
       let* () = match first_duplicate xs with Some y -> Error (CFieldName (c.ctor_name, y)) | None -> Ok () in
@@ -483,12 +484,13 @@ let split_node sg g goal x extra hyp_tag bs =
         | Some y -> Error (CFieldName (c.ctor_name, y))
         | None -> Ok () in
       let binders, rbs, b =
-        field_binders name np params n gn sv.sv_path (rec_count c) hyp_tag xs [] 0 0 0 c.ctor_fields in
-      let indices = List.map (subst (field_sub np params rbs b)) c.ctor_indices in
+        field_binders ~name ~np ~params ~scope:n ~gn ~path:sv.sv_path ~nrec:(nrecs c.ctor_fields) ~hyp_tag
+          xs c.ctor_fields in
+      let indices = List.map (subst (field_sub ~np ~params rbs b)) c.ctor_indices in
       let obj = match sv.sv_prim with
-        | Some _ -> prim_value c.ctor_name
+        | Some pr -> prim_value pr c.ctor_name
         | None -> apps (Const (Ctor (name, c.ctor_name)))
-                    (List.map (lift b) params @ List.map (fun bl -> Var (b -! 1 -! bl)) (List.rev rbs)) in
+                    (List.map (lift b) params @ field_vars rbs b) in
       let g', goal', sb = introduce g gn binders (indices @ [ obj ]) in
       Ok { br_ctor = c.ctor_name; br_binders = b; br_scope = g'; br_goal = goal'; br_subst = sb })
       ctors in
@@ -497,11 +499,11 @@ let split_node sg g goal x extra hyp_tag bs =
 (* ** Elaboration *)
 
 type elab =
-  | ELeaf of scope * term * term list * term       (* scope, goal, values of the arguments, right side *)
-  | ESplit of scope * term * split_info * (int * elab) list
+  | ELeaf of { scope : scope; goal : term; env : term list; rhs : term }
+  | ESplit of { scope : scope; goal : term; split : split_info; branches : (int * elab) list }
 
 let rec elaborate_with sg extra hyp_tag g goal env = function
-  | Leaf rhs -> let* u = resolve_in g rhs in Ok (ELeaf (g, goal, env, u))
+  | Leaf rhs -> let* u = resolve_in g rhs in Ok (ELeaf { scope = g; goal; env; rhs = u })
   | Split (x, bs) ->
       let* si, brs = split_node sg g goal x extra hyp_tag (List.map (fun (c, xs, _) -> (c, xs)) bs) in
       let* es = map_ok (fun (c, _, t) ->
@@ -515,7 +517,7 @@ let rec elaborate_with sg extra hyp_tag g goal env = function
           match List.assoc_opt br.br_ctor es with
           | Some e -> Ok (br.br_binders, e)
           | None -> Error (CBranches x)) brs in
-      Ok (ESplit (g, goal, si, ordered))
+      Ok (ESplit { scope = g; goal; split = si; branches = ordered })
 
 let elaborate sg = elaborate_with sg [] (fun _ -> Anon)
 
@@ -548,8 +550,9 @@ type recursion = {
   rec_strategy : strategy;
 }
 
-(* The component [k] of a tuple of [n] nested to the right. *)
-let component k n h =
+(* The component [k] of a tuple of [n] nested to the right, as [tuple]
+   builds it ([component] of Recursion/Compile.v). *)
+let tuple_component k n h =
   let rec snds k h = if k = 0 then h else snds (k - 1) (Snd h) in
   let h' = snds k h in
   if k + 1 = n then h' else Fst h'
@@ -559,8 +562,8 @@ let component k n h =
 let rec access h p ys =
   match p with
   | [] -> h
-  | [ (k, n) ] -> Fst (apps (component k n h) ys)
-  | (k, n) :: p' -> access (Snd (component k n h)) p' ys
+  | [ (k, n) ] -> Fst (apps (tuple_component k n h) ys)
+  | (k, n) :: p' -> access (Snd (tuple_component k n h)) p' ys
 
 (* The subterm of the structural argument of a call, under [d] binders
    of the right side: its index in the scope, its path and its type. *)
@@ -577,27 +580,24 @@ let subterm_indices rc d u a ys =
   let domains, body = split_pis a in
   let m = List.length domains in
   List.map (subst (fun i ->
-      if i < m then Option.value (List.nth_opt ys (m -! 1 -! i)) ~default:(Var 0)
-      else Var ((i -! m) + (u + 1) + d)))
+      if i < m then List.nth ys (m - 1 - i)
+      else Var (i - m + u + 1 + d)))
     (drop rc.rec_params (snd (spine body)))
-
-let nth_or l i = Option.value (List.nth_opt l i) ~default:(Var 0)
 
 (* A call [f args] under [d] binders, its arguments translated already. *)
 let call rc g env d t args =
   let n = rc.rec_arity in
   let* () = require (n <= List.length args) (CCallArity t) in
-  let cargs = take n args in
-  let s = nth_or cargs rc.rec_struct in
+  let arg = List.nth (take n args) and name = List.nth rc.rec_names in
+  let s = arg rc.rec_struct in
   let* u, p, a = match subterm g d s with Some r -> Ok r | None -> Error (CNotStructural t) in
   let ys = snd (spine s) in
   let* () = require (List.length ys = List.length (fst (split_pis a))) (CNotStructural t) in
-  let name i = Option.value (List.nth_opt rc.rec_names i) ~default:"" in
-  let* () = iter_ok (fun (i, v) -> if nth_or cargs i = v then Ok () else Error (CIndexChanged (name i, t)))
+  let* () = iter_ok (fun (i, v) -> if arg i = v then Ok () else Error (CIndexChanged (name i, t)))
       (combine rc.rec_indices (subterm_indices rc d u a ys)) in
   let* () = iter_ok (fun i ->
       if List.mem i rc.rec_tail || List.mem i rc.rec_indices || i = rc.rec_struct
-         || nth_or cargs i = lift d (nth_or env i)
+         || arg i = lift d (List.nth env i)
       then Ok () else Error (CConstantChanged (name i, t)))
       (List.init n Fun.id) in
   let* acc = match rc.rec_strategy, p with
@@ -607,7 +607,7 @@ let call rc g env d t args =
     | History, _ ->
         (match find_aux 0 g with Some h -> Ok (access (Var (h + d)) p ys) | None -> Error (CNotStructural t))
   in
-  Ok (apps acc (List.map (nth_or cargs) rc.rec_tail @ drop n args))
+  Ok (apps acc (List.map arg rc.rec_tail @ drop n args))
 
 (* A term in translation: done, or the function with its arguments so far. *)
 type part = Done of term | Pending of term list
@@ -643,42 +643,43 @@ let rec calls_in rc g env d t =
   | Pair (a, b) -> let* a' = sub d a in let* b' = sub d b in Ok (Done (Pair (a', b')))
   | Fst u -> let* u' = sub d u in Ok (Done (Fst u'))
   | Snd u -> let* u' = sub d u in Ok (Done (Snd u'))
-  | _ -> Ok (Done t)
+  | Srt _ | Var _ | Void | Unit | Tt | Bool | BTrue | BFalse | Const _ -> Ok (Done t)
 
 let calls rc g env t = let* r = calls_in rc g env 0 t in done_ rc r
 
 (* ** Translation *)
 
-let case = function Ok a -> Ok a | Error e -> E.refuse (RCase e)
+let case = function Ok a -> Ok a | Error e -> Reg.refuse (RCase e)
 
-let level_of x = function Univ k -> Ok k | s -> E.refuse (RCase (CMotiveSort (x, s)))
+let level_of x = function Univ k -> Ok k | s -> Reg.refuse (RCase (CMotiveSort (x, s)))
 
 (* The eliminator of a primitive type, its motive annotated. *)
 let prim_elim pr c ms z =
   match pr, ms with
   | PUnit, [ m ] -> ElimUnit (c, m, z)
   | PBool, [ mt; mf ] -> ElimBool (c, mt, mf, z)
-  | _ -> ElimVoid (c, z)
+  | PVoid, [] -> ElimVoid (c, z)
+  | _ -> invalid_arg "prim_elim: a method for each constructor"
 
 (* The level of [Π(tail). T] after the scope and the seeds. *)
 let motive_level r sg rc g x gn =
-  let* s = E.sort_of r sg (AtMotive (rc.rec_name, x))
+  let* s = Reg.sort_of r sg (AtMotive (rc.rec_name, x))
       (List.rev gn.gn_seed_types @ List.map (fun b -> b.b_type) g) (pis gn.gn_tail_types gn.gn_goal) in
   level_of x s
 
 (* The term of an elaborated tree in its scope, and the instances of
    eliminators it uses. *)
 let rec translate r sg rc = function
-  | ELeaf (g, _, env, rhs) -> let* t = case (calls rc g env rhs) in Ok (t, [])
-  | ESplit (g, _, si, brs) ->
+  | ELeaf { scope = g; env; rhs; _ } -> let* t = case (calls rc g env rhs) in Ok (t, [])
+  | ESplit { scope = g; split = si; branches = brs; _ } ->
       let sv = si.si_var and gn = si.si_gen in
       let n = List.length g in
       let* k = motive_level r sg rc g sv.sv_name gn in
-      (* The methods and the instances of the branches, in reverse. *)
-      let* ms_rev, needed_rev = fold_ok (fun (ms_rev, needed_rev) (b, e) ->
-          let* t, needed' = translate r sg rc e in
-          Ok (lams b (lams (List.length gn.gn_tail) t) :: ms_rev, List.rev_append needed' needed_rev)) ([], []) brs in
-      let ms = List.rev ms_rev and needed = List.rev needed_rev in
+      (* The method of each branch, with the instances it uses. *)
+      let* branches = map_ok (fun (b, e) ->
+          let* t, needed = translate r sg rc e in
+          Ok (lams b (lams (List.length gn.gn_tail) t), needed)) brs in
+      let ms = List.map fst branches and needed = List.concat_map snd branches in
       let name = sv.sv_desc.ind_name in
       let seeds = List.map (var_at n) gn.gn_seeds and tail = List.map (var_at n) gn.gn_tail in
       (match sv.sv_prim with
@@ -691,62 +692,76 @@ let rec translate r sg rc = function
 
 (* Every leaf is reached through a split of the structural argument. *)
 let rec splits_struct = function
-  | ELeaf (g, _, _, _) -> not (List.exists (fun b -> match b.b_tag with User (_, Some []) -> true | _ -> false) g)
-  | ESplit (_, _, _, brs) -> List.for_all (fun (_, e) -> splits_struct e) brs
+  | ELeaf { scope; _ } ->
+      not (List.exists (fun b -> match b.b_tag with User (_, Some []) -> true | _ -> false) scope)
+  | ESplit { branches; _ } -> List.for_all (fun (_, e) -> splits_struct e) branches
 
 let rec equations f = function
-  | ELeaf (_, _, env, rhs) -> [ (apps (Const (Def f)) env, rhs) ]
-  | ESplit (_, _, _, brs) -> List.concat_map (fun (_, e) -> equations f e) brs
+  | ELeaf { env; rhs; _ } -> [ (apps (Const (Def f)) env, rhs) ]
+  | ESplit { branches; _ } -> List.concat_map (fun (_, e) -> equations f e) branches
 
 (* ** Compilation *)
 
 let check_equation r sg f (i, (lhs, rhs)) =
-  match convert ~sg (E.fuel_of r) lhs rhs with
-  | ConvEqual u -> E.emit r (AtEquation (f, i)) [ EvConv (lhs, rhs, u) ]; Ok ()
-  | ConvOutOfFuel -> E.emit r (AtEquation (f, i)) []; Error (NoFuelAt (AtEquation (f, i), lhs))
-  | _ -> E.emit r (AtEquation (f, i)) []; E.refuse (REquation (f, i, lhs, rhs))
+  match convert ~sg (Reg.fuel_of r) lhs rhs with
+  | ConvEqual u -> Reg.emit r (AtEquation (f, i)) [ EvConv (lhs, rhs, u) ]; Ok ()
+  | ConvOutOfFuel -> Reg.emit r (AtEquation (f, i)) []; Error (NoFuelAt (AtEquation (f, i), lhs))
+  | _ -> Reg.emit r (AtEquation (f, i)) []; Reg.refuse (REquation (f, i, lhs, rhs))
+
+(* The direct translation, in the scope [g] of the arguments with the goal
+   [goal] and their values [env]: the tree splits the structural argument
+   at its root, and a call is the hypothesis of a field.  The signature,
+   the body in that scope, the instances of eliminators it uses, and the
+   elaborated tree. *)
+let compile_direct r sg fn rc g goal env =
+  let x = fn.fn_struct in
+  let* () = match fn.fn_tree with
+    | Split (y, _) when y = x -> Ok ()
+    | _ -> Reg.refuse (RCase (CRoot x)) in
+  let* e = case (elaborate_with sg (varying fn) (fun k -> Aux (k + 1)) g goal env fn.fn_tree) in
+  let* t, needed = translate r sg rc e in
+  Ok (sg, t, needed, e)
+
+(* The translation through the history, the root split [si] of the scope
+   [g] (its goal is that of [si]): the motive of the structural argument
+   at its level, the history of its family registered for it, and
+   [recBelow_D] applied to the step, the tree elaborated with the table
+   [Below_D] as [Aux 0]. *)
+let compile_history r sg fn rc si g env =
+  let sv = si.si_var and gn = si.si_gen in
+  let name = sv.sv_desc.ind_name and params = sv.sv_params and q = List.length sv.sv_indices in
+  let* j = motive_level r sg rc g fn.fn_struct gn in
+  let* sg1 = ensure_below r sg name j in
+  let p = motive gn in
+  let seeds = List.map (fun (l, a) -> { b_tag = (level g l).b_tag; b_type = a })
+      (List.combine gn.gn_seeds gn.gn_seed_types) in
+  let table = apps (Const (Def (below_name name j)))
+      (List.map (lift (q + 1)) params @ [ lift (q + 1) p ] @ vars 0 (q + 1)) in
+  let g1, goal1, sb = introduce g gn ({ b_tag = Aux 0; b_type = table } :: List.rev seeds) (vars 1 (q + 1)) in
+  let* e = case (elaborate sg1 g1 goal1 (List.map (subst sb) env) fn.fn_tree) in
+  let* t, needed = translate r sg1 rc e in
+  let step = lams (q + 1) (Lam (lams (List.length gn.gn_tail) t)) in
+  Ok (sg1, apps (Const (Def (recbelow_name name j)))
+             (params @ [ p; step ] @ List.map (var_at (List.length g)) (gn.gn_seeds @ gn.gn_tail)), needed, e)
 
 (* The signature with the history and the instances the function needs,
    its type, its body, and what [out] reads off the elaborated tree. *)
 let compile_with r out sg fn =
-  let f = fn.fn_name and x = fn.fn_struct in
+  let x = fn.fn_struct in
   let* g0, goal0, env0 = case (start fn) in
   let* si = case (prepare_split sg g0 goal0 x (varying fn)) in
   let sv = si.si_var and gn = si.si_gen in
-  let d = sv.sv_desc and params = sv.sv_params and theta = sv.sv_indices in
-  let* () = match sv.sv_prim with Some pr -> E.refuse (RCase (CNotFamily (x, prim_type pr))) | None -> Ok () in
+  let* () = match sv.sv_prim with Some pr -> Reg.refuse (RCase (CNotFamily (x, prim_type pr))) | None -> Ok () in
   let n = List.length g0 in
-  let rc = { rec_name = f; rec_arity = n; rec_struct = sv.sv_level; rec_params = List.length d.ind_params;
-             rec_indices = theta; rec_tail = gn.gn_tail; rec_names = List.map (fun (y, _, _) -> y) fn.fn_args;
+  let rc = { rec_name = fn.fn_name; rec_arity = n; rec_struct = sv.sv_level; rec_params = nparams sv.sv_desc;
+             rec_indices = sv.sv_indices; rec_tail = gn.gn_tail; rec_names = List.map (fun (y, _, _) -> y) fn.fn_args;
              rec_strategy = fn.fn_strategy } in
-  let name = d.ind_name in
   let* sg1, root, needed, e =
     match fn.fn_strategy with
-    | Direct ->
-        let* () = match fn.fn_tree with
-          | Split (y, _) when y = x -> Ok ()
-          | _ -> E.refuse (RCase (CRoot x)) in
-        let* e = case (elaborate_with sg (varying fn) (fun k -> Aux (k + 1)) g0 goal0 env0 fn.fn_tree) in
-        let* t, needed = translate r sg rc e in
-        Ok (sg, t, needed, e)
-    | History ->
-        let q = List.length theta in
-        let* j = motive_level r sg rc g0 x gn in
-        let* sg1 = ensure_below r sg name j in
-        let p = motive gn in
-        let seeds = List.map (fun (l, a) ->
-            { b_tag = (match at_level g0 l with Some b -> b.b_tag | None -> Anon); b_type = a })
-            (combine gn.gn_seeds gn.gn_seed_types) in
-        let table = apps (Const (Def (below_name name j)))
-            (List.map (lift (q + 1)) params @ [ lift (q + 1) p ] @ vars 0 (q + 1)) in
-        let g1, goal1, sb = introduce g0 gn (seeds @ [ { b_tag = Aux 0; b_type = table } ]) (vars 1 (q + 1)) in
-        let* e = case (elaborate sg1 g1 goal1 (List.map (subst sb) env0) fn.fn_tree) in
-        let* t, needed = translate r sg1 rc e in
-        let step = lams (q + 1) (Lam (lams (List.length gn.gn_tail) t)) in
-        Ok (sg1, apps (Const (Def (recbelow_name name j)))
-                   (params @ [ p; step ] @ List.map (var_at n) (gn.gn_seeds @ gn.gn_tail)), needed, e)
+    | Direct -> compile_direct r sg fn rc g0 goal0 env0
+    | History -> compile_history r sg fn rc si g0 env0
   in
-  let* () = if splits_struct e then Ok () else E.refuse (RCase (CUnsplit x)) in
+  let* () = if splits_struct e then Ok () else Reg.refuse (RCase (CUnsplit x)) in
   let* sg2 = fold_ok (fun sg (d, k) -> E.ensure_elim r sg d k) sg1 needed in
   Ok (sg2, pis (List.map (fun b -> b.b_type) (List.rev g0)) goal0, lams n root, out e)
 
@@ -755,11 +770,11 @@ let compile_term r sg fn = compile_with r (equations fn.fn_name) sg fn
 (* The function as a δ-constant, then its equations by conversion. *)
 let compile r sg fn =
   let* sg0, a, b, eqs = compile_term r sg fn in
-  let* sg' = E.define r sg0 fn.fn_name a b in
+  let* sg' = Reg.define r sg0 fn.fn_name a b in
   let* () = iter_ok (check_equation r sg' fn.fn_name) (List.mapi (fun i e -> (i, e)) eqs) in
   Ok sg'
 
-let compile_checked spec fuel sg fn = E.run spec fuel (fun r -> compile r sg fn)
+let compile_checked spec fuel sg fn = Reg.run spec fuel (fun r -> compile r sg fn)
 
 (* Several functions in turn, each in the signature of those before. *)
-let compile_all spec fuel sg fns = E.run spec fuel (fun r -> fold_ok (fun sg fn -> compile r sg fn) sg fns)
+let compile_all spec fuel sg fns = Reg.run spec fuel (fun r -> fold_ok (fun sg fn -> compile r sg fn) sg fns)

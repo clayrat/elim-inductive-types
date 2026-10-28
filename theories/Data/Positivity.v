@@ -58,8 +58,8 @@ Example negative_rejected :
 Proof. split; vm_compute; reflexivity. Qed.
 
 Example negative_bypassed :
-  classify_decl_with true raw_negative = Ok (bypassed (D ~> NVoid)) /\
-  classify_decl_with true raw_negative_bool = Ok (bypassed (D ~> NBool)).
+  classify_decl_with Bypass raw_negative = Ok (bypassed (D ~> NVoid)) /\
+  classify_decl_with Bypass raw_negative_bool = Ok (bypassed (D ~> NBool)).
 Proof. split; vm_compute; reflexivity. Qed.
 
 (** ** The non-strictly positive field *)
@@ -71,7 +71,7 @@ Example non_strict_rejected :
 Proof. vm_compute. reflexivity. Qed.
 
 Example non_strict_bypassed :
-  classify_decl_with true raw_non_strict = Ok (bypassed ((D ~> NBool) ~> NBool)).
+  classify_decl_with Bypass raw_non_strict = Ok (bypassed ((D ~> NBool) ~> NBool)).
 Proof. vm_compute. reflexivity. Qed.
 
 (** ** The diagonal, in the bypass mode *)
@@ -88,7 +88,7 @@ Definition delta : nterm := NConst (Def "delta").
     when registered. *)
 Definition with_diagonal (B diagonal : nterm) : list (stage * list event) * registration :=
   run_registration (
-    let! s1 := declare_with predicative pos_fuel true ∅ (with_mk (D ~> B)) [0] in
+    let! s1 := declare_with predicative pos_fuel Bypass ∅ (with_mk (D ~> B)) [0] in
     let! s2 := define predicative pos_fuel s1 "unmk" (build [] (D ~> D ~> B))
                  (build [] (λ "d", elim_d ((λ "_", D ~> B) ∷ (D ~> Type@ 0)) (λ "g", "g") "d")) in
     define predicative pos_fuel s2 "delta" (build [] (D ~> B)) (build [] diagonal)).

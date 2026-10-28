@@ -1,18 +1,39 @@
 (** * Diagnostics of registration
 
     The stages of a registration log, the diagnostics of both algorithms
-    and the answers of a registration: declarations, instances of
-    eliminators and δ-constants (Elim.Declare), histories
-    (Recursion.Below) and compiled functions (Recursion.Compile).  The
-    diagnostics of case trees and of recursive calls are defined here,
-    below both algorithms, so that algorithm 2 depends on algorithm 1 and
-    not the converse. *)
+    and the answers of a registration: the classification of raw
+    declarations (Elim.Decl), declarations and instances of eliminators
+    (Elim.Declare), δ-constants (Registration), histories
+    (Recursion.Below) and compiled functions (Recursion.Compile).  They
+    are defined here, on the kernel alone and below both algorithms: so
+    algorithm 2 depends on algorithm 1 and not the converse, and the
+    registration monad (Registration), which logs in these terms, depends
+    on neither. *)
 
 From Stdlib Require String.
 From DepTypes.PTS Require Import Syntax Signature Check.
-From IndTypes.Elim Require Import Decl.
 
 Local Notation string := String.string.
+
+(** ** Classification (algorithm 1) *)
+
+Inductive site : Type :=
+| SField : nat -> site      (** a recursive field, by its position *)
+| SResult : site.           (** the result [D Δ ū] *)
+
+Inductive decl_error : Type :=
+| EOpenParams : decl_error                  (** a parameter mentions a later variable *)
+| EOpenIndices : decl_error
+| ESelfReference : decl_error               (** D in its own parameters or indices *)
+| EOpenCtor : string -> decl_error          (** a free variable past the parameters *)
+| EDuplicateCtor : string -> decl_error
+| ENegative : string -> nat -> term -> decl_error   (** constructor, field, its type *)
+| ENonStrict : string -> nat -> term -> decl_error
+| ENested : string -> nat -> term -> decl_error
+| ENotFamily : string -> term -> decl_error         (** the result is not [D Δ ū] *)
+| EArity : string -> site -> term -> decl_error     (** D with the wrong number of arguments *)
+| ENonUniform : string -> site -> term -> decl_error  (** D applied to other parameters *)
+| EInIndices : string -> site -> term -> decl_error.  (** D in the indices *)
 
 (** ** Stages *)
 

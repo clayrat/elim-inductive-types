@@ -1,10 +1,10 @@
 (* The diagnostics of both algorithms, native, as theories/Diagnostics.v:
    the stages of a registration log, the errors of classification, of
    case trees and calls, and of registration, and the answers of a
-   registration.  They lie below both algorithms, so that the native
-   algorithm 2 (Recursion_native) depends on algorithm 1 (Elim_native)
-   and not the converse.  The errors of classification are here as well:
-   the native algorithm 1 is one file. *)
+   registration.  They lie below both algorithms, on the kernel alone, so
+   that the native algorithm 2 (Recursion_native) depends on algorithm 1
+   (Elim_native) and not the converse, and the registration monad
+   (Registration_native) depends on neither. *)
 
 open Pts_native
 

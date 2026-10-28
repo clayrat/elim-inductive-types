@@ -52,6 +52,7 @@ Local Open Scope string_scope.
 Local Open Scope list_scope.
 From DepTypes.Common Require Import Result.
 From DepTypes.PTS Require Import Syntax Named Signature.
+From IndTypes Require Import Telescope MethodLayout.
 From IndTypes.Elim Require Import Decl.
 From IndTypes Require Import Diagnostics.
 
@@ -147,10 +148,11 @@ Fixpoint lookup_user (x : string) (G : scope) : option (nat * option path * term
   match G with
   | [] => None
   | b :: G' =>
-      let further := option_map (fun '(v, p, A) => (S v, p, A)) (lookup_user x G') in
       match b_tag b with
-      | User y p => if String.eqb x y then Some (0, p, b_type b) else further
-      | _ => further
+      | User y p =>
+          if String.eqb x y then Some (0, p, b_type b)
+          else option_map (fun '(v, p, A) => (S v, p, A)) (lookup_user x G')
+      | _ => option_map (fun '(v, p, A) => (S v, p, A)) (lookup_user x G')
       end
   end.
 
@@ -176,20 +178,6 @@ Definition level_type (G : scope) (l : nat) : term :=
 Definition level_name (G : scope) (l : nat) : string :=
   match at_level G l with Some {| b_tag := User x _ |} => x | _ => "_" end.
 
-(** Substitution under the [m] binders of a telescope, and in each entry
-    of one. *)
-Fixpoint upn_sub (m : nat) (sb : nat -> term) : nat -> term :=
-  match m with
-  | 0 => sb
-  | S m' => up_sub (upn_sub m' sb)
-  end.
-
-Fixpoint subst_tele (sb : nat -> term) (As : list term) : list term :=
-  match As with
-  | [] => []
-  | A :: As' => subst sb A :: subst_tele (up_sub sb) As'
-  end.
-
 (** Whether [A], in a context of [l] binders, mentions the binder at
     level [m]. *)
 Definition mentions_level (l : nat) (A : term) (m : nat) : bool :=
@@ -204,6 +192,7 @@ Definition mentions_level (l : nat) (A : term) (m : nat) : bool :=
     split has replaced, or to a hypothesis not used. *)
 Definition anonymous (b : binder) : bool := match b_tag b with Anon => true | _ => false end.
 
+(** From the binders [bs] at the level [l] on, [acc] the tail so far. *)
 Fixpoint tail_from (l : nat) (bs : list binder) (ss extra acc : list nat) : list nat :=
   match bs with
   | [] => acc
@@ -212,6 +201,9 @@ Fixpoint tail_from (l : nat) (bs : list binder) (ss extra acc : list nat) : list
                    (mem l extra || existsb (mentions_level l (b_type b)) (ss ++ acc)) in
       tail_from (S l) bs' ss extra (if joins then acc ++ [l] else acc)
   end.
+
+(** The tail of a split of the seeds [ss] in the scope [G]. *)
+Definition split_tail (G : scope) (ss extra : list nat) : list nat := tail_from 0 (rev G) ss extra [].
 
 (** In the motive, the seeds follow the scope of [N] binders and the tail
     follows them. *)
@@ -235,10 +227,10 @@ Record generalized : Type := {
 }.
 
 (** The generalization of the goal [G ⊢ goal] over the seeds [ss] with
-    [extra] in the tail.  The seeds must not depend on the tail. *)
-Definition generalize (G : scope) (goal : term) (ss extra : list nat) : result case_error generalized :=
+    the tail [tail] of the split.  The seeds must not depend on the
+    tail. *)
+Definition generalize_with (G : scope) (goal : term) (ss tail : list nat) : result case_error generalized :=
   let N := length G in
-  let tail := tail_from 0 (rev G) ss extra [] in
   let* _ := mapM (fun s =>
               match find (mentions_level s (level_type G s)) tail with
               | Some t => Err (CGeneralize (level_name G s) (level_name G t))
@@ -249,6 +241,10 @@ Definition generalize (G : scope) (goal : term) (ss extra : list nat) : result c
         gn_seed_types := mapi_from (fun i s => relevel mv s (N + i) (level_type G s)) 0 ss;
         gn_tail_types := mapi_from (fun k t => relevel mv t (N + length ss + k) (level_type G t)) 0 tail;
         gn_goal := relevel mv N (N + length ss + length tail) goal |}.
+
+(** With [extra] in the tail. *)
+Definition generalize (G : scope) (goal : term) (ss extra : list nat) : result case_error generalized :=
+  generalize_with G goal ss (split_tail G ss extra).
 
 (** [λθ̄ z. Π(tail). T], in the scope. *)
 Definition motive (gn : generalized) : term :=
@@ -268,11 +264,12 @@ Definition instantiate (N s b k : nat) (values : list term) (A : term) : term :=
 Definition motive_at (N : nat) (gn : generalized) (b : nat) (values : list term) : term :=
   instantiate N (length (gn_seeds gn)) b 0 values (pis (gn_tail_types gn) (gn_goal gn)).
 
-(** The scope after the new binders [B] (outermost first, each after the
-    scope and those before it), with the seeds standing for [values] (in
-    the scope with [B]) and the tail bound again after them: the scope,
-    the goal, and the substitution from the old scope into the new one.
-    The binders of the seeds and of the old tail lose their names. *)
+(** The scope after the new binders [B] (innermost first, as in a
+    scope: each after the scope and those after it in [B]), with the
+    seeds standing for [values] (in the scope with [B]) and the tail
+    bound again after them: the scope, the goal, and the substitution
+    from the old scope into the new one.  The binders of the seeds and of
+    the old tail lose their names. *)
 Definition introduce (G : scope) (gn : generalized) (B : list binder) (values : list term)
   : scope * term * (nat -> term) :=
   let N := length G in
@@ -294,13 +291,13 @@ Definition introduce (G : scope) (gn : generalized) (B : list binder) (values : 
               | None => Var (v + b + n)
               end
     end in
-  (rev tail ++ rev B ++ old, inst n (gn_goal gn), sb).
+  (rev tail ++ B ++ old, inst n (gn_goal gn), sb).
 
 (** ** Splits *)
 
 (** The primitive types of lecture 6, split by their own eliminators: as
-    families without parameters, indices or fields, with the constructors
-    [tt], [true] and [false]. *)
+    families without parameters, indices or fields, whose constructors
+    [tt], [true] and [false] stand for their values. *)
 Inductive prim : Type := PVoid | PUnit | PBool.
 
 Definition prim_of (A : term) : option prim :=
@@ -309,17 +306,29 @@ Definition prim_of (A : term) : option prim :=
 Definition prim_type (pr : prim) : term :=
   match pr with PVoid => Void | PUnit => Unit | PBool => Bool end.
 
-Definition prim_desc (pr : prim) : ind_desc :=
-  let ctor c := {| ctor_name := c; ctor_fields := []; ctor_indices := [] |} in
+Definition prim_name (pr : prim) : string :=
+  match pr with PVoid => "Void" | PUnit => "Unit" | PBool => "Bool" end.
+
+(** The constructors, each with its value. *)
+Definition prim_ctors (pr : prim) : list (string * term) :=
   match pr with
-  | PVoid => {| ind_name := "Void"; ind_params := []; ind_indices := []; ind_level := 0; ind_ctors := [] |}
-  | PUnit => {| ind_name := "Unit"; ind_params := []; ind_indices := []; ind_level := 0; ind_ctors := [ctor "tt"] |}
-  | PBool => {| ind_name := "Bool"; ind_params := []; ind_indices := []; ind_level := 0;
-                ind_ctors := [ctor "true"; ctor "false"] |}
+  | PVoid => []
+  | PUnit => [("tt", Tt)]
+  | PBool => [("true", BTrue); ("false", BFalse)]
   end.
 
-Definition prim_value (c : string) : term :=
-  if String.eqb c "tt" then Tt else if String.eqb c "true" then BTrue else BFalse.
+Definition prim_desc (pr : prim) : ind_desc :=
+  {| ind_name := prim_name pr; ind_params := []; ind_indices := []; ind_level := 0;
+     ind_ctors := map (fun '(c, _) => {| ctor_name := c; ctor_fields := []; ctor_indices := [] |})
+                    (prim_ctors pr) |}.
+
+(** The value of the constructor [c] of [pr]; a split asks only for the
+    constructors of [prim_desc pr]. *)
+Definition prim_value (pr : prim) (c : string) : term :=
+  match find (fun cv => String.eqb (fst cv) c) (prim_ctors pr) with
+  | Some (_, v) => v
+  | None => Var 0
+  end.
 
 (** A variable to split and its type, as written: [D Δ θ̄] with
     distinct variables as indices, or a primitive type.  Its position and
@@ -377,31 +386,36 @@ Section Fields.
     | None => lift b (nth (np - 1 - (n - length rbs)) params (Var 0))
     end.
 
-  (** The fields named [xs] from position [l] on, after [b] binders; [k]
-      recursive fields before them.  The binders, outermost first, the
-      positions of all the fields and the number of binders.  The
-      hypothesis of a recursive field [r : Πȳ:B̄. D Δ v̄] is
-      [Πȳ:B̄. Π(tail). T] for [v̄] and [r ȳ]: the motive applied, reduced. *)
-  Fixpoint field_binders (xs : list string) (rbs : list nat) (b k l : nat) (fs : list field)
-    : list binder * list nat * nat :=
-    match fs, xs with
-    | fd :: fs', x :: xs' =>
-        let A := subst (field_sub rbs b) (field_type D np l fd) in
-        match fd with
-        | FArg _ =>
-            let '(bs, rbs', b') := field_binders xs' (b :: rbs) (S b) k (S l) fs' in
-            (mk_binder (User x None) A :: bs, rbs', b')
-        | FRec Bs vs =>
-            let m := length Bs in
-            let sb := field_sub rbs (S b) in
-            let H := pis (subst_tele sb Bs)
-                       (motive_at N gn (S b + m) (map (subst (upn_sub m sb)) vs ++ [apps (Var m) (vars 0 m)])) in
-            let p := option_map (fun p => p ++ [(k, nrec)]) sub in
-            let '(bs, rbs', b') := field_binders xs' (b :: rbs) (S (S b)) (S k) (S l) fs' in
-            (mk_binder (User x p) A :: mk_binder (hyp_tag k) H :: bs, rbs', b')
-        end
-    | _, _ => ([], rbs, b)
+  (** The binders of the field [fd] named [x] at [l], its binder at [b]
+      after the earlier fields at [rbs] with [k] recursive ones among them,
+      on the binders [B] before it, innermost first: the field and, after
+      a recursive one [r : Πȳ:B̄. D Δ v̄], its hypothesis [Πȳ:B̄. Π(tail). T]
+      for [v̄] and [r ȳ]: the motive applied, reduced. *)
+  Definition bind_field (x : string) (B : list binder) (fd : field) (l k b : nat) (rbs : list nat)
+    : list binder :=
+    let A := subst (field_sub rbs b) (field_type D np l fd) in
+    match fd with
+    | FArg _ => mk_binder (User x None) A :: B
+    | FRec Bs vs =>
+        let m := length Bs in
+        let sb := field_sub rbs (S b) in
+        let H := pis (subst_tele sb Bs)
+                   (motive_at N gn (S b + m) (map (subst (upn_sub m sb)) vs ++ [apps (Var m) (vars 0 m)])) in
+        let p := option_map (fun p => p ++ [(k, nrec)]) sub in
+        mk_binder (hyp_tag k) H :: mk_binder (User x p) A :: B
     end.
+
+  (** The fields [fs] named [xs], as [fold_slots] of MethodLayout lays
+      them out after the scope: the binders, innermost first as in a
+      scope, the positions of all the fields and the number of binders.
+      The names are taken in order, with the binders. *)
+  Definition field_binders (xs : list string) (fs : list field) : list binder * list nat * nat :=
+    let '(xB, rbs, b) := fold_slots (fun '(xs, B) fd l k b rbs =>
+                                       match xs with
+                                       | x :: xs' => (xs', bind_field x B fd l k b rbs)
+                                       | [] => ([], B)
+                                       end) (xs, []) fs in
+    (snd xB, rbs, b).
 End Fields.
 
 (** A split: the variable, and the generalization of the goal over its
@@ -419,23 +433,23 @@ Record branch : Type := {
 Definition count_name (c : string) (names : list string) : nat :=
   length (filter (String.eqb c) names).
 
-Definition rec_count (c : ctor_desc) : nat :=
-  length (filter (fun fd => match fd with FRec _ _ => true | FArg _ => false end) (ctor_fields c)).
-
 (** The variable [x] with its family, and the generalization of the goal
-    over its indices and itself, with [extra] in the tail.  First the
-    parameters must not mention what is generalized: at the root, a
-    varying parameter is non-uniform recursion. *)
+    over its indices and itself, with [extra] in the tail, computed once.
+    First the parameters must not mention what is generalized: at the
+    root, a varying parameter is non-uniform recursion. *)
 Definition prepare_split (sg : signature) (G : scope) (goal : term) (x : string) (extra : list nat)
   : result case_error split_info :=
   let* sv := family_of sg G x in
+  let N := length G in
   let ss := sv_indices sv ++ [sv_level sv] in
+  let tail := split_tail G ss extra in
+  let gone := ss ++ tail in
   let* _ := mapM (fun pa =>
-              match find (mentions_level (length G) pa) (ss ++ tail_from 0 (rev G) ss extra []) with
+              match find (mentions_level N pa) gone with
               | Some t => Err (CParams x (level_name G t))
               | None => Ok tt
               end) (sv_params sv) in
-  let* gn := generalize G goal ss extra in
+  let* gn := generalize_with G goal ss tail in
   Ok {| si_var := sv; si_gen := gn |}.
 
 (** The split of [x] in the goal [G ⊢ goal], [extra] in the tail and the
@@ -467,12 +481,12 @@ Definition split_node (sg : signature) (G : scope) (goal : term) (x : string) (e
               | Some y => Err (CFieldName (ctor_name c) y)
               | None => Ok tt
               end in
-    let '(B, rbs, b) := field_binders D np params N gn (sv_path sv) (rec_count c) hyp_tag xs [] 0 0 0 (ctor_fields c) in
+    let '(B, rbs, b) := field_binders D np params N gn (sv_path sv) (nrecs (ctor_fields c)) hyp_tag xs (ctor_fields c) in
     let indices := map (subst (field_sub np params rbs b)) (ctor_indices c) in
     let obj := match sv_prim sv with
-               | Some _ => prim_value (ctor_name c)
+               | Some pr => prim_value pr (ctor_name c)
                | None => apps (Const (Ctor D (ctor_name c)))
-                           (map (lift b) params ++ map (fun bl => Var (b - 1 - bl)) (rev rbs))
+                           (map (lift b) params ++ field_vars rbs b)
                end in
     let '(G', goal', sb) := introduce G gn B (indices ++ [obj]) in
     Ok {| br_ctor := ctor_name c; br_binders := b; br_scope := G'; br_goal := goal'; br_subst := sb |})

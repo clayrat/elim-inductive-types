@@ -25,7 +25,10 @@
     motive comes after the parameters, and a hypothesis after every
     recursive field.  [transport] renames a field type into that
     telescope: an earlier field goes to its position among the binders of
-    the method, a parameter past the motive and all those binders.
+    the method, a parameter past the motive and all those binders.  The
+    positions come from [fold_slots] of MethodLayout, which lays out the
+    binders of a method once, here for its type and in Recursion for the
+    history and the branches of case trees.
 
     The level j is part of the constant's name, [Elim D j]: every instance
     has one closed type with a concrete level.  There is no universe
@@ -40,24 +43,12 @@ From Stdlib Require Import List Arith.
 From Stdlib Require String.
 Import ListNotations.
 From DepTypes.PTS Require Import Syntax Signature.
+From IndTypes Require Import Telescope MethodLayout.
 From IndTypes.Elim Require Import Decl.
 
 Local Notation string := String.string.
 
-(** ** Renamings of telescopes *)
-
-Fixpoint upn_ren (m : nat) (r : nat -> nat) : nat -> nat :=
-  match m with
-  | 0 => r
-  | S m' => up_ren (upn_ren m' r)
-  end.
-
-(** Renames a telescope: each entry under the entries before it. *)
-Fixpoint rename_tele (r : nat -> nat) (As : list term) : list term :=
-  match As with
-  | [] => []
-  | A :: As' => rename r A :: rename_tele (up_ren r) As'
-  end.
+(** ** Independent entries *)
 
 (** Entries of a telescope that do not depend on each other: the i-th is
     lifted past the i before it. *)
@@ -65,16 +56,6 @@ Fixpoint lifted (i : nat) (As : list term) : list term :=
   match As with
   | [] => []
   | A :: As' => lift i A :: lifted (S i) As'
-  end.
-
-(** From the context of the parameters and the earlier fields of a
-    constructor into the telescope of its method: [rbs] are the positions
-    of the earlier fields among the binders of the method, innermost
-    first, and [b] the number of those binders so far. *)
-Definition transport (rbs : list nat) (b : nat) (n : nat) : nat :=
-  match nth_error rbs n with
-  | Some bl => b - 1 - bl
-  | None => n - length rbs + S b
   end.
 
 (** ** Motive, methods, eliminator *)
@@ -101,30 +82,32 @@ Section Generate.
     pis (rename_tele r' Bs)
       (apps (Var (S b + m)) (map (rename (upn_ren m r')) vs ++ [apps (Var m) (vars 0 m)])).
 
-  (** The method of the constructor [c] from its field at position [l] on,
-      in the context of the parameters and the motive. *)
-  Fixpoint method_from (c : string) (rbs : list nat) (b l : nat) (fs : list field) (us : list term)
-    : term :=
-    match fs with
-    | [] =>
-        apps (Var b) (map (rename (transport rbs b)) us ++
-          [apps (Const (Ctor D c)) (vars (S b) p ++ map (fun bl => Var (b - 1 - bl)) (rev rbs))])
-    | FArg A :: fs' =>
-        Pi (rename (transport rbs b) A) (method_from c (b :: rbs) (S b) (S l) fs' us)
-    | FRec Bs vs :: fs' =>
-        Pi (rename (transport rbs b) (field_type D p l (FRec Bs vs)))
-          (Pi (hyp_type (transport rbs b) b Bs vs)
-             (method_from c (b :: rbs) (S (S b)) (S l) fs' us))
+  (** The binders of the field [fd] at [l], its binder at [b] after the
+      earlier fields at [rbs], on the binders [Ts] before it, innermost
+      first: the field and, after a recursive one, its hypothesis. *)
+  Definition bind_field (Ts : list term) (fd : field) (l _ b : nat) (rbs : list nat) : list term :=
+    let r := transport rbs b in
+    match fd with
+    | FArg A => rename r A :: Ts
+    | FRec Bs vs => hyp_type r b Bs vs :: rename r (field_type D p l fd) :: Ts
     end.
 
+  (** The method of the constructor [c], in the context of the parameters
+      and the motive. *)
   Definition method_type (c : ctor_desc) : term :=
-    method_from (ctor_name c) [] 0 0 (ctor_fields c) (ctor_indices c).
+    let '(Ts, rbs, b) := fold_slots bind_field [] (ctor_fields c) in
+    fold_left (fun body T => Pi T body) Ts
+      (apps (Var b) (map (rename (transport rbs b)) (ctor_indices c) ++
+         [apps (Const (Ctor D (ctor_name c))) (vars (S b) p ++ field_vars rbs b)])).
+
+  (** The methods, each lifted past those before it. *)
+  Definition methods : list term := lifted 0 (map method_type (ind_ctors d)).
 
   (** [Π(Δ). ΠP. M₁ → ⋯ → M_k → Πθ̄:Θ̄. Πx:D Δ θ̄. P θ̄ x]. *)
   Definition elim_type : term :=
     pis (ind_params d)
       (Pi motive_type
-         (pis (lifted 0 (map method_type (ind_ctors d)))
+         (pis methods
             (pis (rename_tele (Nat.add (S k)) (ind_indices d))
                (Pi (apps (Const (Ind D)) (vars (q + S k) p ++ vars 0 q))
                   (apps (Var (S (k + q))) (vars 1 q ++ [Var 0])))))).
@@ -148,7 +131,7 @@ Section Generate.
     let obj := apps (Const (Ctor D (ctor_name c))) (params ++ vars 0 n) in
     {| rule_ctor := ctor_name c;
        rule_ctx := rev (rename_tele (Nat.add (S k)) (field_types D p 0 (ctor_fields c))) ++
-                   rev (lifted 0 (map method_type (ind_ctors d))) ++
+                   rev methods ++
                    [motive_type] ++ rev (ind_params d);
        rule_lhs := apps (Const (Elim D j)) (pre ++ us ++ [obj]);
        rule_rhs := apps (Var (n + k - 1 - i)) (iota_args D j pre (rev params) (ctor_fields c) (vars 0 n));

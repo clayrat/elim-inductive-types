@@ -31,8 +31,11 @@ vendor/pts-dependent-types/theories/MLTT/Choose.v
 vendor/pts-dependent-types/theories/MLTT/Constants.v
 vendor/pts-dependent-types/theories/MLTT/Families.v
 
-theories/Elim/Decl.v
+theories/Telescope.v
+theories/MethodLayout.v
 theories/Diagnostics.v
+theories/Elim/Decl.v
+theories/Registration.v
 theories/Elim/Generate.v
 theories/Elim/Declare.v
 theories/Recursion/Below.v
