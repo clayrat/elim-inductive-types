@@ -4,7 +4,7 @@
    declarations outside the grammar with the diagonal of the bypass mode,
    and one declaration for every diagnostic. *)
 
-open Looping
+open Named
 open Elim_native
 module P = Pts_native
 module Co = Constants
@@ -17,8 +17,8 @@ let void = Const P.Void and unit = Const P.Unit and bool = Const P.Bool
 
 let ctor c names t = { rc_name = c; rc_type = build names t }
 
-let decl ?(params = []) ?(indices = []) name ctors =
-  { rd_name = name; rd_params = params; rd_indices = indices; rd_level = 0; rd_ctors = ctors }
+let decl ?(params = []) ?(indices = []) ?(sort = P.Univ 0) name ctors =
+  { rd_name = name; rd_params = params; rd_indices = indices; rd_sort = sort; rd_ctors = ctors }
 
 (* ℕ, lists, vectors over ℕ, binary trees, W-types. *)
 let raw_nat = decl "Nat" [ ctor "zero" [] Co.nat; ctor "succ" [] (arrow Co.nat Co.nat) ]
@@ -31,7 +31,7 @@ let raw_list =
       ctor "cons" [ "A" ] (arrows [ name "A"; list (name "A") ] (list (name "A"))) ]
 
 let list_desc = {
-  P.ind_name = "List"; ind_params = [ type0 ]; ind_indices = []; ind_level = 0;
+  P.ind_name = "List"; ind_params = [ type0 ]; ind_indices = []; ind_sort = P.Univ 0; ind_elim = P.AllSorts;
   ind_ctors = [
     { P.ctor_name = "nil"; ctor_fields = []; ctor_indices = [] };
     { P.ctor_name = "cons"; ctor_fields = [ P.FArg (P.Var 0); P.FRec ([], []) ]; ctor_indices = [] };
@@ -50,7 +50,7 @@ let tree = k (P.Ind "Tree")
 let raw_tree = decl "Tree" [ ctor "leaf" [] tree; ctor "node" [] (arrows [ tree; tree ] tree) ]
 
 let tree_desc = {
-  P.ind_name = "Tree"; ind_params = []; ind_indices = []; ind_level = 0;
+  P.ind_name = "Tree"; ind_params = []; ind_indices = []; ind_sort = P.Univ 0; ind_elim = P.AllSorts;
   ind_ctors = [
     { P.ctor_name = "leaf"; ctor_fields = []; ctor_indices = [] };
     { P.ctor_name = "node"; ctor_fields = [ P.FRec ([], []); P.FRec ([], []) ]; ctor_indices = [] };
@@ -101,7 +101,7 @@ let unmk_type b = build [] (arrows [ d; d ] b)
 let unmk_body b =
   build []
     (abs [ "d" ]
-       (call (k (P.Elim ("D", 0)))
+       (call (k (P.Elim ("D", P.Univ 0)))
           [ ann (abs [ "_" ] (arrow d b)) (arrow d (universe 0)); abs [ "g" ] (name "g"); name "d" ]))
 
 let bnot x = ElimBool (ann (abs [ "_" ] bool) (arrow bool (universe 0)), Const P.BFalse, Const P.BTrue, x)
@@ -109,6 +109,62 @@ let is_true b = ElimBool (ann (abs [ "_" ] (universe 0)) (arrow bool (universe 1
 let void_diagonal = abs [ "d" ] (call unmk [ name "d"; name "d" ])
 let bool_diagonal = abs [ "d" ] (bnot (call unmk [ name "d"; name "d" ]))
 let diagonal = build [] (Apply (delta, Apply (mk, delta)))
+
+(* The propositions of Data/Logic.v, in the sort Prop, and data with a
+   proof field. *)
+let prop = Sort P.Prp
+let prp = P.Srt P.Prp
+let false_ = k (P.Ind "False")
+let raw_true = decl ~sort:P.Prp "True" [ ctor "I" [] (k (P.Ind "True")) ]
+let raw_false = decl ~sort:P.Prp "False" []
+
+let raw_eq =
+  let eq a x y = call (k (P.Ind "eq")) [ a; x; y ] in
+  decl ~sort:P.Prp "eq" ~params:[ type0; build [ "A" ] (name "A") ] ~indices:[ build [ "a"; "A" ] (name "A") ]
+    [ ctor "refl" [ "a"; "A" ] (eq (name "A") (name "a") (name "a")) ]
+
+let connective d ctors =
+  let c = call (k (P.Ind d)) [ name "A"; name "B" ] in
+  decl ~sort:P.Prp d ~params:[ prp; prp ] (List.map (fun (n, fields) -> ctor n [ "B"; "A" ] (arrows fields c)) ctors)
+
+let raw_and = connective "and" [ "conj", [ name "A"; name "B" ] ]
+let raw_or = connective "or" [ "or_introl", [ name "A" ]; "or_intror", [ name "B" ] ]
+
+(* [D A P] with [c : Πx:A. P x → D A P], A at the level [i]. *)
+let exists_at ?(sort = P.Prp) d c i =
+  decl ~sort d ~params:[ P.Srt (P.Univ i); build [ "A" ] (arrow (name "A") prop) ]
+    [ ctor c [ "P"; "A" ]
+        (pi "x" (name "A") (arrow (Apply (name "P", name "x")) (call (k (P.Ind d)) [ name "A"; name "P" ]))) ]
+
+let raw_ex = exists_at "ex" "ex_intro" 0
+let raw_ex1 = exists_at "ex1" "ex1_intro" 1
+let raw_sig = exists_at ~sort:(P.Univ 0) "sig" "exist" 0
+let raw_sigT0 = exists_at ~sort:(P.Univ 0) "sigT0" "existT0" 1
+
+let raw_accp =
+  let accp x = call (k (P.Ind "AccP")) [ name "A"; name "R"; x ] in
+  decl ~sort:P.Prp "AccP" ~params:[ prp; build [ "A" ] (arrows [ name "A"; name "A" ] prop) ]
+    ~indices:[ build [ "R"; "A" ] (name "A") ]
+    [ ctor "introP" [ "R"; "A" ]
+        (pi "x" (name "A")
+           (arrow (pi "y" (name "A") (arrow (call (name "R") [ name "y"; name "x" ]) (accp (name "y"))))
+              (accp (name "x")))) ]
+
+let boolp = k (P.Ind "BoolP")
+let raw_boolp = decl ~sort:P.Prp "BoolP" [ ctor "trueP" [] boolp; ctor "falseP" [] boolp ]
+let raw_badp =
+  let badp = k (P.Ind "BadP") in
+  decl ~sort:P.Prp "BadP" [ ctor "mkBad" [] (arrow (arrow badp false_) badp) ]
+
+(* [mkBigP : (Type₀ → BigP) → BigP] of Tests.v: a recursive field over
+   [Type₀], so its history is one level above its motive. *)
+let raw_bigp =
+  let bigp = k (P.Ind "BigP") in
+  decl ~sort:P.Prp "BigP" [ ctor "mkBigP" [] (arrow (arrow (universe 0) bigp) bigp) ]
+
+(* [observe_proof p := elim_BoolP[Type₀] (λ_. Bool) true false p]. *)
+let observe_proof p =
+  build [] (call (k (P.Elim ("BoolP", P.Univ 0))) [ abs [ "_" ] bool; Const P.BTrue; Const P.BFalse; p ])
 
 (* A declaration of E with the one constructor c, as in Tests.v. *)
 let e = k (P.Ind "E")

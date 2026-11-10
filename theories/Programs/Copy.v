@@ -24,9 +24,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Families.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import W.
@@ -57,7 +56,7 @@ Definition sg_copy : signature := sg_of copy_run.
 Example copy_stages :
   map fst (fst copy_run) =
   [AtMotive "copy" "w"; AtDefType "copy"; AtDefBody "copy"; AtEquation "copy" 0;
-   AtMotive "copy_h" "w"; AtElimType "W" 1; AtRuleLhs "W" 1 "sup"; AtRuleRhs "W" 1 "sup";
+   AtMotive "copy_h" "w"; AtElimType "W" (Univ 1); AtRuleLhs "W" (Univ 1) "sup"; AtRuleRhs "W" (Univ 1) "sup";
    AtDefType "Below_W_0"; AtDefBody "Below_W_0"; AtDefType "build_W_0"; AtDefBody "build_W_0";
    AtDefType "recBelow_W_0"; AtDefBody "recBelow_W_0";
    AtMotive "copy_h" "w"; AtDefType "copy_h"; AtDefBody "copy_h"; AtEquation "copy_h" 0].

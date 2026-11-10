@@ -1,15 +1,16 @@
 (** * The dependent eliminator of a classified description
 
-    For a classified declaration D and a chosen level j of the motive,
-    the instance [elim_D[j]]:
-    - the motive [P : Πθ̄:Θ̄. D Δ θ̄ → Type_j]: large elimination at any j
-      (it is restricted only for Prop, in the next lecture);
+    For a classified declaration D and a chosen sort s of the motive,
+    [Type_j] or [Prop], the instance [elim_D[s]]:
+    - the motive [P : Πθ̄:Θ̄. D Δ θ̄ → s]; whether D may be eliminated
+      into s is decided by its category, when the instance is registered
+      (Elim.Declare), not here;
     - for each constructor a method type: its fields, each recursive
       field [r : Πȳ:B̄. D Δ v̄] followed at once by its hypothesis
       [Πȳ:B̄. P v̄ (r ȳ)], and the result [P ū (c_k Δ ā)];
-    - [elim_D[j] : Π(Δ). ΠP. M₁ → ⋯ → M_k → Πθ̄. Πx:D Δ θ̄. P θ̄ x];
-    - the ι-rules [elim_D[j] Δ P m̄ ū (c_k Δ ā) ↝ m_k args(ā, ih̄)], with
-      [ih := λȳ. elim_D[j] Δ P m̄ v̄ (r ȳ)] for a recursive field.
+    - [elim_D[s] : Π(Δ). ΠP. M₁ → ⋯ → M_k → Πθ̄. Πx:D Δ θ̄. P θ̄ x];
+    - the ι-rules [elim_D[s] Δ P m̄ ū (c_k Δ ā) ↝ m_k args(ā, ih̄)], with
+      [ih := λȳ. elim_D[s] Δ P m̄ v̄ (r ȳ)] for a recursive field.
 
     The method type and the arguments [args] come from one left-to-right
     pass over the classified fields: a non-recursive field gives one
@@ -30,8 +31,8 @@
     binders of a method once, here for its type and in Recursion for the
     history and the branches of case trees.
 
-    The level j is part of the constant's name, [Elim D j]: every instance
-    has one closed type with a concrete level.  There is no universe
+    The sort s is part of the constant's name, [Elim D s]: every instance
+    has one closed type with a concrete sort.  There is no universe
     polymorphism and no cumulativity.
 
     The ι-rule of a constructor is given as data for its check: the
@@ -62,16 +63,16 @@ Fixpoint lifted (i : nat) (As : list term) : list term :=
 
 Section Generate.
   Variable d : ind_desc.
-  Variable j : nat.
+  Variable s : sort.
 
   Let D := ind_name d.
   Let p := length (ind_params d).
   Let q := length (ind_indices d).
   Let k := length (ind_ctors d).
 
-  (** [Πθ̄:Θ̄. D Δ θ̄ → Type_j], in the context of the parameters. *)
+  (** [Πθ̄:Θ̄. D Δ θ̄ → s], in the context of the parameters. *)
   Definition motive_type : term :=
-    pis (ind_indices d) (Pi (apps (Const (Ind D)) (vars q p ++ vars 0 q)) (Srt (Univ j))).
+    pis (ind_indices d) (Pi (apps (Const (Ind D)) (vars q p ++ vars 0 q)) (Srt s)).
 
   (** The hypothesis of a recursive field just bound: [r] renames its
       domains and indices to the binders before the field, [b] counts
@@ -117,7 +118,7 @@ Section Generate.
   Record iota_rule : Type := {
     rule_ctor : string;
     rule_ctx : ctx;          (** the fields, the methods, the motive, the parameters *)
-    rule_lhs : term;         (** [elim_D[j] Δ P m̄ ū (c Δ ā)] *)
+    rule_lhs : term;         (** [elim_D[s] Δ P m̄ ū (c Δ ā)] *)
     rule_rhs : term;         (** [m_c args(ā, ih̄)] *)
     rule_type : term;        (** [P ū (c Δ ā)] *)
   }.
@@ -133,8 +134,8 @@ Section Generate.
        rule_ctx := rev (rename_tele (Nat.add (S k)) (field_types D p 0 (ctor_fields c))) ++
                    rev methods ++
                    [motive_type] ++ rev (ind_params d);
-       rule_lhs := apps (Const (Elim D j)) (pre ++ us ++ [obj]);
-       rule_rhs := apps (Var (n + k - 1 - i)) (iota_args D j pre (rev params) (ctor_fields c) (vars 0 n));
+       rule_lhs := apps (Const (Elim D s)) (pre ++ us ++ [obj]);
+       rule_rhs := apps (Var (n + k - 1 - i)) (iota_args D s pre (rev params) (ctor_fields c) (vars 0 n));
        rule_type := apps (Var (n + k)) (us ++ [obj]) |}.
 
   Fixpoint rules_from (i : nat) (cs : list ctor_desc) : list iota_rule :=

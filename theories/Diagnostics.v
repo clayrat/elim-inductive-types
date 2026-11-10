@@ -41,9 +41,10 @@ Inductive stage : Type :=
 | AtIndType : string -> stage                     (** the type of D *)
 | AtCtorType : string -> string -> stage          (** D, the constructor *)
 | AtField : string -> string -> nat -> stage      (** D, the constructor, the field *)
-| AtElimType : string -> nat -> stage             (** D, j *)
-| AtRuleLhs : string -> nat -> string -> stage    (** D, j, the constructor *)
-| AtRuleRhs : string -> nat -> string -> stage
+| AtDomain : string -> string -> nat -> stage     (** D, the constructor, the recursive field: its domains, for the level of a history *)
+| AtElimType : string -> sort -> stage            (** D, the sort of the motive *)
+| AtRuleLhs : string -> sort -> string -> stage   (** D, the sort, the constructor *)
+| AtRuleRhs : string -> sort -> string -> stage
 | AtDefType : string -> stage
 | AtDefBody : string -> stage
 | AtMotive : string -> string -> stage          (** f, the variable split: the sort of the motive *)
@@ -78,8 +79,10 @@ Inductive reg_error : Type :=
 | RClassify : decl_error -> reg_error
 | RTaken : gref -> reg_error                      (** the name is in the signature already *)
 | RUndeclared : string -> reg_error               (** an instance of a type not declared *)
-| RLevel : string -> nat -> sort -> nat -> reg_error
-    (** the constructor, the field, its sort, the level of D *)
+| RLevel : string -> nat -> sort -> sort -> reg_error
+    (** the constructor, the field, its sort, the sort of D *)
+| RElimSort : string -> sort -> reg_error
+    (** D, the sort of a motive its category does not allow *)
 | RNotAType : stage -> term -> reg_error          (** the type of the term does not unfold to a sort *)
 | RRejected : stage -> error -> reg_error         (** the checker rejected the input of the stage *)
 | ROpen : reg_error                               (** an entry with a free variable *)

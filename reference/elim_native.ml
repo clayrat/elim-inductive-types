@@ -21,9 +21,16 @@ type raw_decl = {
   rd_name : string;
   rd_params : term list;
   rd_indices : term list;
-  rd_level : int;
+  rd_sort : sort;                 (* Type_i or Prop *)
   rd_ctors : raw_ctor list;
 }
+
+(* The category of elimination by the sort of D alone; registration
+   refines it from the sorts of the fields. *)
+let sort_class = function Prp -> PropOnly | _ -> AllSorts
+
+(* The level of a sort of declarations; Prop counts as 0. *)
+let sort_level = function Univ i -> i | _ -> 0
 
 (* Whether D, one of its constructors or an instance of its eliminator
    occurs in a term. *)
@@ -36,6 +43,9 @@ let rec mentions name = function
   | ElimUnit (c, branch, u) -> mentions name c || mentions name branch || mentions name u
   | ElimBool (c, yes, no, b) ->
       mentions name c || mentions name yes || mentions name no || mentions name b
+  | Case (d, _, m, x, bs) ->
+      d = name || mentions name m || mentions name x || List.exists (mentions name) bs
+  | Fix (a, _, b) -> mentions name a || mentions name b
 
 let free_of name t = not (mentions name t)
 
@@ -111,7 +121,7 @@ let classify_decl_with mode d =
     | None -> Ok ()
   in
   Ok { ind_name = name; ind_params = d.rd_params; ind_indices = d.rd_indices;
-       ind_level = d.rd_level; ind_ctors = ctors }
+       ind_sort = d.rd_sort; ind_elim = sort_class d.rd_sort; ind_ctors = ctors }
 
 let classify_decl = classify_decl_with Checked
 
@@ -120,9 +130,9 @@ let classify_decl = classify_decl_with Checked
 (* Entries independent of each other: the i-th lifted past the i before it. *)
 let lifted i tys = List.mapi (fun k a -> lift (i + k) a) tys
 
-let motive_type d j =
+let motive_type d s =
   let p = nparams d and q = nindices d in
-  pis d.ind_indices (Pi (apps (Const (Ind d.ind_name)) (vars q p @ vars 0 q), Srt (Univ j)))
+  pis d.ind_indices (Pi (apps (Const (Ind d.ind_name)) (vars q p @ vars 0 q), Srt s))
 
 (* [Πȳ:B̄. P v̄ (r ȳ)] for the recursive field just bound: [r] renames
    the domains and indices to the b binders before the field. *)
@@ -155,10 +165,10 @@ let method_type d c =
 let methods d = lifted 0 (List.map (method_type d) d.ind_ctors)
 
 (* [Π(Δ). ΠP. M₁ → ⋯ → M_k → Πθ̄. Πx:D Δ θ̄. P θ̄ x]. *)
-let elim_type d j =
+let elim_type d s =
   let p = nparams d and q = nindices d and k = nctors d in
   pis d.ind_params
-    (Pi (motive_type d j,
+    (Pi (motive_type d s,
          pis (methods d)
            (pis (rename_tele (fun n -> n + k + 1) d.ind_indices)
               (Pi (apps (Const (Ind d.ind_name)) (vars (q + k + 1) p @ vars 0 q),
@@ -172,10 +182,10 @@ type iota_rule = {
   rule_type : term;
 }
 
-(* [elim_D[j] Δ P m̄ ū (c Δ ā) ↝ m_c args(ā, ih̄)] against [P ū (c Δ ā)],
+(* [elim_D[s] Δ P m̄ ū (c Δ ā) ↝ m_c args(ā, ih̄)] against [P ū (c Δ ā)],
    in the context of the parameters, P, the methods and the fields; the
    arguments are the kernel's own. *)
-let iota_rules d j =
+let iota_rules d s =
   let name = d.ind_name in
   let p = nparams d and k = nctors d in
   let past_methods n = n + k + 1 in
@@ -187,73 +197,106 @@ let iota_rules d j =
       let obj = apps (Const (Ctor (name, c.ctor_name))) (params @ vars 0 n) in
       { rule_ctor = c.ctor_name;
         rule_ctx = List.rev (rename_tele past_methods (List.mapi (field_type name p) c.ctor_fields))
-                   @ List.rev (methods d) @ [motive_type d j] @ List.rev d.ind_params;
-        rule_lhs = apps (Const (Elim (name, j))) (pre @ indices @ [obj]);
+                   @ List.rev (methods d) @ [motive_type d s] @ List.rev d.ind_params;
+        rule_lhs = apps (Const (Elim (name, s))) (pre @ indices @ [obj]);
         rule_rhs = apps (Var (n + k - 1 - i))
-                     (method_args name j pre (List.rev params) c.ctor_fields (vars 0 n));
+                     (method_args name s pre (List.rev params) c.ctor_fields (vars 0 n));
         rule_type = apps (Var (n + k)) (indices @ [obj]) })
     d.ind_ctors
 
 (* ** Registration *)
 
-let within s level = match s with Univ i -> i <= level | _ -> false
+(* A field of sort [s] in a declaration of sort [sd]: Prop is
+   impredicative, Type_i takes proofs and types up to its level. *)
+let within s sd =
+  match sd, s with
+  | Prp, _ -> true
+  | Univ _, Prp -> true
+  | Univ i, Univ k -> k <= i
+  | _ -> false
 
-(* Each field is a type of level at most that of D, in the context of the
-   parameters and the earlier fields. *)
+(* The category of a declaration of sort [s] whose constructors have
+   fields of the sorts [fss]: an empty proposition, or a singleton one
+   whose fields are all proofs, eliminates into every sort. *)
+let elim_class_of s fss =
+  match s, fss with
+  | Prp, [] -> AllSorts
+  | Prp, [ ss ] -> if List.for_all (( = ) Prp) ss then AllSorts else PropOnly
+  | Prp, _ -> PropOnly
+  | _ -> AllSorts
+
+(* Whether the registration of an instance checks the sort of its motive
+   against the category of D, or bypasses it. *)
+type elim_mode = CheckElim | BypassElim
+
+(* Each field is a type of a sort allowed in D, in the context of the
+   parameters and the earlier fields: their sorts. *)
 let rec check_fields r sg d c gamma l = function
-  | [] -> Ok ()
+  | [] -> Ok []
   | fd :: rest ->
       let a = field_type d.ind_name (nparams d) l fd in
       let* s = sort_of r sg (AtField (d.ind_name, c, l)) gamma a in
-      let* () = if within s d.ind_level then Ok () else refuse (RLevel (c, l, s, d.ind_level)) in
-      check_fields r sg d c (a :: gamma) (l + 1) rest
+      let* () = if within s d.ind_sort then Ok () else refuse (RLevel (c, l, s, d.ind_sort)) in
+      let* ss = check_fields r sg d c (a :: gamma) (l + 1) rest in
+      Ok (s :: ss)
 
+(* The constructors are checked with D at the category of its sort; the
+   entry registered has the category of the sorts of their fields. *)
 let declare_ind_with r mode sg raw =
   let name = raw.rd_name in
-  let* d = Result.map_error (fun e -> Refuse (RClassify e)) (classify_decl_with mode raw) in
+  let* d0 = Result.map_error (fun e -> Refuse (RClassify e)) (classify_decl_with mode raw) in
   let* () = if Option.is_some (find_ind sg name) then refuse (RTaken (Ind name)) else Ok () in
-  let* sg1 = add sg (EInd d) in
-  let* _ = sort_of r sg1 (AtIndType name) [] (ind_type d) in
-  let* () = iter_ok (fun c ->
-      let* _ = sort_of r sg1 (AtCtorType (name, c.ctor_name)) [] (ctor_type d c) in
-      check_fields r sg1 d c.ctor_name (List.rev d.ind_params) 0 c.ctor_fields)
-    d.ind_ctors in
-  Ok (sg1, d)
+  let* sg1 = add sg (EInd d0) in
+  let* _ = sort_of r sg1 (AtIndType name) [] (ind_type d0) in
+  let* fss = map_ok (fun c ->
+      let* _ = sort_of r sg1 (AtCtorType (name, c.ctor_name)) [] (ctor_type d0 c) in
+      check_fields r sg1 d0 c.ctor_name (List.rev d0.ind_params) 0 c.ctor_fields)
+    d0.ind_ctors in
+  let d = { d0 with ind_elim = elim_class_of d0.ind_sort fss } in
+  let* sg' = add sg (EInd d) in
+  Ok (sg', d)
 
-let check_rule r sg name j rule =
-  let* () = checked r (AtRuleLhs (name, j, rule.rule_ctor))
+let check_rule r sg name s rule =
+  let* () = checked r (AtRuleLhs (name, s, rule.rule_ctor))
       (run_check ~sg (spec_of r) (fuel_of r) rule.rule_ctx rule.rule_lhs rule.rule_type) in
-  checked r (AtRuleRhs (name, j, rule.rule_ctor))
+  checked r (AtRuleRhs (name, s, rule.rule_ctor))
     (run_check ~sg (spec_of r) (fuel_of r) rule.rule_ctx rule.rule_rhs rule.rule_type)
 
-(* The type of the instance; its rules, in a signature where it has none
+(* The sort of the motive, allowed by the category of D unless bypassed;
+   the type of the instance; its rules, in a signature where it has none
    active; the instance with active rules. *)
-let declare_elim r sg name j =
+let declare_elim_with r em sg name s =
   let* d = match find_ind sg name with Some d -> Ok d | None -> refuse (RUndeclared name) in
-  let* () = if Option.is_some (find_elim sg name j) then refuse (RTaken (Elim (name, j))) else Ok () in
-  let ty = elim_type d j in
-  let* _ = sort_of r sg (AtElimType (name, j)) [] ty in
-  let* tmp = add sg (EElim (name, j, ty, false)) in
-  let* () = iter_ok (check_rule r tmp name j) (iota_rules d j) in
-  add sg (EElim (name, j, ty, true))
+  let* () = if Option.is_some (find_elim sg name s) then refuse (RTaken (Elim (name, s))) else Ok () in
+  let* () = match em with
+    | CheckElim ->
+        if allows_elimination (spec_of r) d.ind_elim s then Ok () else refuse (RElimSort (name, s))
+    | BypassElim -> Ok () in
+  let ty = elim_type d s in
+  let* _ = sort_of r sg (AtElimType (name, s)) [] ty in
+  let* tmp = add sg (EElim (name, s, ty, false)) in
+  let* () = iter_ok (check_rule r tmp name s) (iota_rules d s) in
+  add sg (EElim (name, s, ty, true))
 
-let declare_with r mode sg raw levels =
+let declare_elim r = declare_elim_with r CheckElim
+
+let declare_with r mode em sg raw sorts =
   let* sg, _ = declare_ind_with r mode sg raw in
-  fold_ok (fun sg j -> declare_elim r sg raw.rd_name j) sg levels
+  fold_ok (fun sg s -> declare_elim_with r em sg raw.rd_name s) sg sorts
 
-let declare r = declare_with r Checked
+let declare r = declare_with r Checked CheckElim
 
-let ensure_elim r sg name j =
-  match find_elim sg name j with
+let ensure_elim r sg name s =
+  match find_elim sg name s with
   | Some (_, true) -> Ok sg
-  | _ -> declare_elim r sg name j
+  | _ -> declare_elim r sg name s
 
 (* [Unit_ℓ]: the primitive at level 0, a declaration above. *)
 let unit_name l = "Unit_" ^ string_of_int l
 let tt_name l = "tt_" ^ string_of_int l
 
 let unit_decl l = {
-  rd_name = unit_name l; rd_params = []; rd_indices = []; rd_level = l;
+  rd_name = unit_name l; rd_params = []; rd_indices = []; rd_sort = Univ l;
   rd_ctors = [ { rc_name = tt_name l; rc_type = Const (Ind (unit_name l)) } ] }
 
 let unit_at l = if l = 0 then Unit else Const (Ind (unit_name l))
@@ -263,5 +306,8 @@ let ensure_unit r sg l =
   if l = 0 || Option.is_some (find_ind sg (unit_name l)) then Ok sg
   else let* sg, _ = declare_ind_with r Checked sg (unit_decl l) in Ok sg
 
-let declare_checked spec fuel sg raw levels = run spec fuel (fun r -> declare r sg raw levels)
-let declare_bypassing spec fuel sg raw levels = run spec fuel (fun r -> declare_with r Bypass sg raw levels)
+let declare_checked spec fuel sg raw sorts = run spec fuel (fun r -> declare r sg raw sorts)
+let declare_bypassing spec fuel sg raw sorts =
+  run spec fuel (fun r -> declare_with r Bypass CheckElim sg raw sorts)
+let declare_bypassing_elim spec fuel sg raw sorts =
+  run spec fuel (fun r -> declare_with r Checked BypassElim sg raw sorts)

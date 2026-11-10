@@ -22,6 +22,55 @@ program. The lecture plan is [plan-inductive-types.md](plan-inductive-types.md);
 the plan of the next lecture, on CoC, CIC, PCUIC and Prop, is
 [plan-coc-cic-pcuic.md](plan-coc-cic-pcuic.md).
 
+## Branch `cic`: declarations in Prop
+
+On the branch `cic`, for the next lecture, on CoC, CIC, PCUIC and Prop,
+algorithm 1 declares propositions; the kernel is on its branch `cic`
+too, and the tag `lecture-7` keeps the state of lecture 7. This is stage 2
+of the plan of that lecture, in the repository `erasure-cic`.
+
+- A declaration has a sort, `Type_i` or `Prop`, in place of a level
+  (`rd_sort`, `ind_sort`), and an instance of the eliminator the sort of
+  its motive, `Elim D s`: `elimD[j]` for `Type_j`, `elimD[Prop]`.
+- Fields are checked by sort: in `Type_i` a proof, or a type up to the
+  level i; in `Prop` a field of any sort, Prop being impredicative.
+  Positivity, uniformity and the types of the constructors are checked as
+  before.
+- The registration computes the category of elimination from the sorts of
+  the fields (`elim_class_of`): data, the empty propositions and the
+  singleton ones, whose only constructor has proofs for fields, eliminate
+  into every sort; any other proposition only into Prop. The kernel
+  stores the category in the description and answers
+  `allows_elimination`, which the registration of an instance checks,
+  refusing with `RElimSort`.
+- The mode `BypassElim` skips this check alone, to show a proof observed;
+  its signatures are outside the contracts.
+
+`Data/Logic.v` declares `True`, `False`, `eq`, `and`, `or`, `ex`, `AccP`
+and `BoolP` on the hierarchy with Prop of the kernel, `predicative_prop`:
+`True`, `False`, `eq`, `and` and `AccP` eliminate into Type, `or`, `ex` and
+`BoolP` only into Prop; `ex` over `Type₁` is registered, the extraction of
+its witness into Type refused, and the same shape in `Type₀` refused by the
+level of the witness; data eliminates into Prop as well. In the mode
+`BypassElim`, `elimBoolP[0]` tells the proofs `trueP` and `falseP` apart.
+
+Stage 3 puts `match` and `fix` into the kernel (`Case`, `Fix`; its
+`CIC/Match.v`). Here they meet the declarations: the kernel's typing of a
+match asks the same `allows_elimination` as the registration of an
+instance, so a match on `or` into Prop is accepted and one into Type₀
+refused (`Data/Logic.v`), and the kernel's `nat_rect`, written with `fix`
+and `match`, has the type generated for `elimNat[j]` and checks against it
+in the signature registered by algorithm 1 at three levels
+(`Tests.v`). The occurrence check of positivity and the calls of case
+trees go through the new terms as well. Stage 4 adds the guard of `fix`
+to the kernel; the programs of this lecture written with `fix` and
+`match` are compared with their case trees in `erasure-cic`
+(`theories/Examples/Paired.v`).
+`make demo` ends with these, and the differential test compares them.
+`declaration_sound` states the sorts of the fields and the category they
+give, `instance_sound` the allowed sort, and the open obligations are
+stated on the hierarchy with Prop.
+
 ## The kernel and this repository
 
 The kernel is [pts-dependent-types](https://github.com/clayrat/pts-dependent-types),
@@ -78,7 +127,7 @@ repository hold their plan only.
 | declarations and classification of fields (strict positivity) | implemented in `Elim/Decl.v`; faithfulness and strict positivity proved; reproduces the kernel's hand-written descriptions of ℕ, `Vec`, `W` and `Tr`, classifies lists, binary trees and Void/Unit/Bool, rejects the two inadmissible declarations and gives every diagnostic |
 | generator of eliminators | implemented in `Elim/Generate.v`: motive, methods, eliminator types and ι-rules as data; reproduces the kernel's hand-written `elimNat`, `elimVec`, `elimW`, `elimTr`; every generated rule is the kernel's contraction and both sides check against its type; read with the primitives, the types and rules of Void, Unit and Bool are those of lecture 6 |
 | `declare_checked`, `define_checked`, `Unit_ℓ` | implemented in `Elim/Declare.v`: classification, freshness, the types of D and its constructors, levels of fields, then each instance in the four stages of the plan, its rules checked in the signature without active rules; in `Registration.v`, shared with algorithm 2, a δ-constant checked without itself; every run of the checker logged with its stage. Soundness of all three registrations proved from the checker's. Declaring ℕ, `Vec`, `W` and `Tr` gives the kernel's hand-written signature, `double` the kernel's entry; in the bypass mode `δ (mk δ) : Void` is accepted and the Bool diagonal ends `Undecided` |
-| `Below_D`, `build_D`, `recBelow_D` and `Unit_ℓ` | implemented in `Recursion/Below.v`: from a classified description and the level j of the motive, at the history level ℓ = max(i, j), the three δ-constants per pair (D, j), registered with `Unit_ℓ`, `elim_D[ℓ+1]` and `elim_D[ℓ]` by `ensure_below`; soundness proved from that of `define`. On open terms they compute to the formulas of the lecture for ℕ (at levels 0 and 1), `Vec`, binary trees, `W`, `Tr` and a family in `Type₁`; the primitive `Unit` in place of `Unit_1` is refused |
+| `Below_D`, `build_D`, `recBelow_D` and `Unit_ℓ` | implemented in `Recursion/Below.v`: from a classified description and the level j of the motive, at the history level ℓ = max(i, j) for `D : Type_i` and, for `D : Prop`, the largest of j and the inferred levels of the domains of its recursive fields, the three δ-constants per pair (D, j), registered with `Unit_ℓ`, `elim_D[ℓ+1]` and `elim_D[ℓ]` by `ensure_below`; soundness proved from that of `define`. On open terms they compute to the formulas of the lecture for ℕ (at levels 0 and 1), `Vec`, binary trees, `W`, `Tr` and a family in `Type₁`; the primitive `Unit` in place of `Unit_1` is refused |
 | case trees | implemented in `Recursion/CaseTree.v`: annotated functions with named case trees, and their elaboration into scopes and goals. A split of `z : D Δ θ̄`, or of a variable of the primitive Void, Unit or Bool, generalizes the indices, `z` and the dependent tail of the scope, and binds in each branch the fields with their hypotheses and the tail again, refined (splitting a constant `b : Bool` refines a constant `c : IsTrue b`); the values of the arguments (the left sides of the equations) and the paths of pattern variables follow. On `half`, `append`, a hypothesis on the length of a vector, W, binary trees and `Tr` every scope is a context the checker accepts and every right side without recursion checks against its goal; every diagnostic arises |
 | `compile_checked` | implemented in `Recursion/Compile.v`: the motive of the recursion with Γ_P, through the history (`recBelow_D` with a step over the history) or directly (the root split by `elim_D[j]`, calls becoming hypotheses); every split by the instance at exactly the level of its motive, found by the checker, a split of Void, Unit or Bool by its primitive eliminator; every leaf reached through a split of the structural argument, so that its equation can hold by definition; calls replaced by accesses to the history, with the check of structural decrease; the output registered as a δ-constant checked without itself, and every defining equation checked by conversion. Soundness proved from that of `define` and of the conversion check |
 | ℕ, lists, vectors, binary trees, W, ℕ_W; Void/Unit/Bool against the primitives | in `Data/`; ℕ_W as the δ-constants `IsTrue`, `Nat_W`, `zero_W`, `succ_W` over W in `Data/W.v`, with the positions `IsTrue false ≡ Void` and `IsTrue true ≡ Unit`, and one step of `elim_W[0]` on `succ_W n` (δ, β, ι to the head form; the ι-reduct checks only after one more β); the recursor `rec_W` with a constant motive, its equations on open `n` and computations on canonical terms; the transfer of dependent induction `ind_W`, refused by conversion in the branch `true` (`P (succ_W (f tt))` against `P (sup true f)`), the branch `false` refused on its own, and the conversions η for Π and Unit would supply, but not in the branch of zero |
@@ -102,8 +151,9 @@ make clean
 
 `_CoqProject` maps `vendor/pts-dependent-types/theories` to `DepTypes` and
 `theories/` to `IndTypes`. Only the kernel modules the lecture needs are
-built (`Common`, `PTS`, `Configs`, and `SystemU/Looping`, `SystemU/Encodings`
-for the observations the kernel's printer prints), so the kernel's PCF
+built (`Common`, `PTS`, `Configs`, `SystemU/Looping`, `SystemU/Encodings`
+for the observations the kernel's printer prints, the hand-written
+signatures of `MLTT`, and `CIC/Match`), so the kernel's PCF
 translation and its strictness-pcf dependency are not required.
 
 `extraction/Extract.v` writes `extraction/generated/deptypes.ml`, and make
@@ -145,29 +195,30 @@ demonstrations and `regress.ml` the tests.
 
 | File | What goes in it |
 |------|-----------------|
-| `Telescope.v` | Telescopes over the kernel's syntax alone: `split_pis` with `pis_split`, the renamings `upn_ren` and `rename_tele` and the substitutions `upn_sub` and `subst_tele`, each entry under those before it; shared by both algorithms. |
+| `Telescope.v` | Telescopes over the kernel's syntax alone: `split_pis` with `pis_split`, the renamings `upn_ren` and `rename_tele`, each entry under those before it; shared by both algorithms. Substitution in a telescope (`upn`, `subst_tele`) is the kernel's `PTS/Telescope.v`. |
 | `MethodLayout.v` | The layout of the binders of a method, shared by both algorithms: each field, a recursive one followed by its hypothesis; `fold_slots`, one pass over them with an accumulator in which the method types, the methods of the history and the binders of branches are built directly; `transport`/`transport_past` and `field_vars` into the telescope of a method; the sizes `nrecs` and `nbinders`. |
 | `Diagnostics.v` | The stages of registration logs, the diagnostics of both algorithms (classification and registration, case trees and recursive calls) and the answers of a registration, on the kernel alone and below both algorithms: algorithm 2 depends on algorithm 1 and not the converse, and `Registration.v` on neither. |
-| `Elim/Decl.v` | Raw declarations after Dybjer's schema and their classification into non-recursive and recursive fields: the strict positivity check, uniform parameters, levels of fields; the bypass mode for the negative demo. |
+| `Elim/Decl.v` | Raw declarations after Dybjer's schema, in a sort `Type_i` or `Prop`, and their classification into non-recursive and recursive fields: the strict positivity check, uniform parameters; the category of the sort alone; the bypass mode for the negative demo. |
 | `Registration.v` | The registration monad of both algorithms: every run of the checker logged with its stage, its answer the value, the refusal or the lack of fuel of the stage; `sort_of`, `add`, the answers `registered` and `refusal`, and what a passed check guarantees in the judgments of the annotated kernel; `define` and `define_checked` for the δ-constants of both algorithms, `define_sound` stating `defined`: the name free, the type a type, the body checked against it without the constant. |
-| `Elim/Generate.v` | The motive, method and eliminator types of `elim_D[j]` and its ι-rules, from one left-to-right pass over the fields shared with the kernel's ι-scheme. |
-| `Elim/Declare.v` | `declare_checked`: a declaration (classified, fresh, its types and the levels of its fields checked) and its instances, each in four stages through a temporary signature where its rules are not active; `ensure_elim`, `ensure_unit` and `Unit_ℓ` for ℓ > 0; the bypass mode `declare_bypassing` (`Bypass` of `positivity`); every checker run logged by stage through `Registration`. `declare_ind_sound`, `declare_elim_sound`: what a successful registration guarantees, in the judgments of the annotated kernel. |
-| `Recursion/Below.v` | `Below_D`, `build_D`, `recBelow_D` from a description, at the history level ℓ = max(i, j), one triple per pair (D, j). |
+| `Elim/Generate.v` | The motive, method and eliminator types of `elim_D[s]` and its ι-rules, from one left-to-right pass over the fields shared with the kernel's ι-scheme. |
+| `Elim/Declare.v` | `declare_checked`: a declaration (classified, fresh, its types and the sorts of its fields checked, its category of elimination computed from them) and its instances, each once the category allows its sort, in four stages through a temporary signature where its rules are not active; `ensure_elim`, `ensure_unit` and `Unit_ℓ` for ℓ > 0; the bypass modes `declare_bypassing` (`Bypass` of `positivity`) and `declare_bypassing_elim` (`BypassElim`); every checker run logged by stage through `Registration`. `declare_ind_sound`, `declare_elim_sound`: what a successful registration guarantees, in the judgments of the annotated kernel. |
+| `Recursion/Below.v` | `Below_D`, `build_D`, `recBelow_D` from a description, at the history level ℓ (`max(i, j)` for `D : Type_i`; for a proposition, inferred from the domains of its recursive fields), one triple per pair (D, j). |
 | `Recursion/CaseTree.v` | Annotated functions: the structural argument, constant and varying arguments, the strategy (direct or through the history), named case trees; scopes, the generalization of a goal over a split, branches with fields, hypotheses and the refined tail, the paths of pattern variables, and the elaboration of a tree. |
 | `Recursion/Compile.v` | The motive Γ_P, the translation of splits and recursive calls, `compile_checked` with the defining equations by conversion. |
 | `Data/Sigma.v` | Σ: formation, the dependent `snd`, `A × B`, `Σn:ℕ. Vec A n`. |
 | `Data/Primitives.v` | Void, Unit and Bool as declarations, against the primitives of lecture 6. |
-| `Data/Nat.v` | ℕ as the first declaration; instances at several levels. |
+| `Data/Nat.v` | ℕ as the first declaration; instances at several levels; the kernel's `nat_rect` by fix and match against the generated type of `elimNat[j]`. |
 | `Data/Lists.v` | Lists and vectors: parameters against indices. |
 | `Data/Tree.v` | Binary trees: the order `left, ih_left, right, ih_right`. |
 | `Data/Positivity.v` | The negative and the non-strictly positive field; `δ (mk δ) : Void` in the bypass mode, `Undecided` for the Bool variant. |
+| `Data/Logic.v` | Propositions on the hierarchy with Prop: `True`, `False`, `eq`, `and`, `or`, `ex`, `AccP`, `BoolP`, their categories of elimination, the refused large eliminations, a witness in `Type₁`, a proof as a field of data, and a proof observed in the mode `BypassElim`; a match on `or` into Prop accepted and into Type₀ refused by the same `allows_elimination`. |
 | `Data/W.v` | W-types, ℕ_W, the rejected transfer of dependent induction. |
 | `Programs/Direct.v` | `+`, `pow` and `f` by the direct translation. |
 | `Programs/Half.v` | `half` and `isEven` through the history; `Unit_1` against `Unit : Type₀`. |
 | `Programs/Append.v` | `append`; the branch `nil` rejected with addition on the second argument; generalization in a dependent split of a vector. |
 | `Programs/Rejected.v` | `g (succ n) = g (pred n)`, Ackermann's function, non-uniform recursion. |
 | `Programs/Copy.v` | `copy` on W, a call on a functional recursive field, directly and through the history; on ℕ_W. |
-| `Contracts.v` | The guarantees of the lecture: proved (classification faithful and strictly positive; registrations of declarations, instances, δ-constants and histories sound; compilations sound), checked on every output, and open: for algorithm 1 the completeness of the classification, the generated instances typed declaratively for every declaration and level, their registration succeeding with enough fuel, and the signatures built by registrations, compilations included, type-correct, normalizing and consistent; for algorithm 2 the history typed declaratively and registrable, the translation keeping the types of the right sides, the equations holding by definition, the checks of a compilation passing with enough fuel, and compiled functions total. |
+| `Contracts.v` | The guarantees of the lecture: proved (classification faithful and strictly positive; registrations of declarations, instances, δ-constants and histories sound; compilations sound), checked on every output, and open: for algorithm 1 the completeness of the classification, the generated instances typed declaratively for every declaration and sort, their registration succeeding with enough fuel, and the signatures built by registrations, compilations included, type-correct, normalizing and consistent; for algorithm 2 the history typed declaratively and registrable, the translation keeping the types of the right sides, the equations holding by definition, the checks of a compilation passing with enough fuel, and compiled functions total. |
 | `Tests.v` | Tests of every algorithm: classification diagnostics, generated rules, registrations and their refusals, the history of every family. |
 
 [`reference/`](reference/README.md) holds native versions of the lecture's

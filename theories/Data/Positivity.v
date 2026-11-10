@@ -29,9 +29,8 @@ From Stdlib Require Import String List.
 Import ListNotations.
 From DepTypes.Common Require Import Result.
 From DepTypes.Common Require Import Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From IndTypes.Elim Require Import Decl Declare.
 
 Open Scope string_scope.
@@ -40,11 +39,11 @@ Open Scope nterm_scope.
 Definition D : nterm := NConst (Ind "D").
 
 Definition with_mk (field : nterm) : raw_decl := {|
-  rd_name := "D"; rd_params := []; rd_indices := []; rd_level := 0;
+  rd_name := "D"; rd_params := []; rd_indices := []; rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "mk" (build [] (field ~> D))] |}.
 
 Definition bypassed (field : nterm) : ind_desc := {|
-  ind_name := "D"; ind_params := []; ind_indices := []; ind_level := 0;
+  ind_name := "D"; ind_params := []; ind_indices := []; ind_sort := Univ 0; ind_elim := AllSorts;
   ind_ctors := [{| ctor_name := "mk"; ctor_fields := [FArg (build [] field)]; ctor_indices := [] |}] |}.
 
 (** ** The negative field *)
@@ -79,7 +78,7 @@ Proof. vm_compute. reflexivity. Qed.
 Definition pos_fuel : nat := 300.
 
 Definition mk : nterm := NConst (Ctor "D" "mk").
-Definition elim_d : nterm := NConst (Elim "D" 0).
+Definition elim_d : nterm := NConst (Elim "D" (Univ 0)).
 Definition unmk : nterm := NConst (Def "unmk").
 Definition delta : nterm := NConst (Def "delta").
 
@@ -88,13 +87,10 @@ Definition delta : nterm := NConst (Def "delta").
     when registered. *)
 Definition with_diagonal (B diagonal : nterm) : list (stage * list event) * registration :=
   run_registration (
-    let! s1 := declare_with predicative pos_fuel Bypass ∅ (with_mk (D ~> B)) [0] in
+    let! s1 := declare_with predicative pos_fuel Bypass CheckElim ∅ (with_mk (D ~> B)) [Univ 0] in
     let! s2 := define predicative pos_fuel s1 "unmk" (build [] (D ~> D ~> B))
                  (build [] (λ "d", elim_d ((λ "_", D ~> B) ∷ (D ~> Type@ 0)) (λ "g", "g") "d")) in
     define predicative pos_fuel s2 "delta" (build [] (D ~> B)) (build [] diagonal)).
-
-Definition sg_of (r : list (stage * list event) * registration) : signature :=
-  match registered r with Some sg => sg | None => ∅ end.
 
 Definition void_diagonal : list (stage * list event) * registration :=
   with_diagonal NVoid (λ "d", unmk "d" "d").
@@ -122,6 +118,6 @@ Proof. split; vm_compute; [discriminate | reflexivity]. Qed.
 
 (** Without the bypass the declaration is refused. *)
 Example negative_refused :
-  refusal (declare_checked predicative pos_fuel ∅ raw_negative [0])
+  refusal (declare_checked predicative pos_fuel ∅ raw_negative [Univ 0])
   = Some (RClassify (ENegative "mk" 0 (build [] (D ~> NVoid)))).
 Proof. vm_compute. reflexivity. Qed.

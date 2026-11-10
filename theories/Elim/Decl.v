@@ -1,7 +1,8 @@
 (** * Declarations of inductive families and their classification
 
     The input of algorithm 1: a declaration after Dybjer's schema,
-    [data D (Δ) : Πθ̄:Θ̄. Type_i where c₁ : con … c_k : con], with
+    [data D (Δ) : Πθ̄:Θ̄. s where c₁ : con … c_k : con], with the sort
+    [s] of D either [Type_i] or [Prop], and
 
       con ::= Π(x : A). con               non-recursive field: D not in A
             | Π(r : Πȳ:B̄. D Δ v̄). con     recursive field: D not in B̄, v̄
@@ -29,9 +30,13 @@
     closed in its telescope, and constructor names are distinct.  Nested
     and mutual declarations are outside the grammar.
 
-    The levels of the fields, at most i, are checked when the declaration
-    is registered (Elim.Declare): that needs the checker, and the
-    recursive fields need D in the signature.
+    The sorts of the fields are checked when the declaration is
+    registered (Elim.Declare): that needs the checker, and the recursive
+    fields need D in the signature.  For the same reason classification
+    gives D the category of elimination of its sort alone, [sort_class]:
+    data eliminates into every sort, a proposition into Prop.  The
+    registration refines it from the sorts of the fields: an empty or a
+    singleton proposition eliminates into every sort too.
 
     Classification checks strict positivity ([Checked]); the bypass mode
     ([Bypass]) classifies a field that fails it as non-recursive, for the
@@ -66,9 +71,24 @@ Record raw_decl : Type := mk_raw_decl {
   rd_name : string;
   rd_params : list term;
   rd_indices : list term;
-  rd_level : nat;
+  rd_sort : sort;     (** [Type_i] or [Prop] *)
   rd_ctors : list raw_ctor;
 }.
+
+(** The category of elimination by the sort of D alone. *)
+Definition sort_class (s : sort) : elim_class :=
+  match s with
+  | Prp => PropOnly
+  | _ => AllSorts
+  end.
+
+(** The level of a sort of declarations: [Type_i] has level i, and Prop
+    counts as 0, below [Type₀]. *)
+Definition sort_level (s : sort) : nat :=
+  match s with
+  | Univ i => i
+  | _ => 0
+  end.
 
 (** ** Occurrences of D *)
 
@@ -79,7 +99,7 @@ Definition of_family (D : string) (g : gref) : bool :=
   end.
 
 (** Whether D, one of its constructors or an instance of its eliminator
-    occurs in [t]. *)
+    occurs in [t]; a match on D mentions D. *)
 Fixpoint mentions (D : string) (t : term) : bool :=
   match t with
   | Const g => of_family D g
@@ -88,6 +108,8 @@ Fixpoint mentions (D : string) (t : term) : bool :=
   | Lam b | Fst b | Snd b => mentions D b
   | ElimUnit C c u => mentions D C || mentions D c || mentions D u
   | ElimBool C t f b => mentions D C || mentions D t || mentions D f || mentions D b
+  | Case D' _ P x bs => String.eqb D' D || mentions D P || mentions D x || existsb (mentions D) bs
+  | Fix A _ b => mentions D A || mentions D b
   end.
 
 Definition free_of (D : string) (t : term) : bool := negb (mentions D t).
@@ -194,17 +216,11 @@ Definition classify_decl_with (mode : positivity) (d : raw_decl) : result decl_e
             | None => Ok tt
             end in
   Ok {| ind_name := rd_name d; ind_params := rd_params d; ind_indices := rd_indices d;
-        ind_level := rd_level d; ind_ctors := cs |}.
+        ind_sort := rd_sort d; ind_elim := sort_class (rd_sort d); ind_ctors := cs |}.
 
 Definition classify_decl : raw_decl -> result decl_error ind_desc := classify_decl_with Checked.
 
 (** ** Faithfulness *)
-
-Lemma apps_spine : forall t, apps (spine_head t) (spine_args t) = t.
-Proof.
-  induction t; try reflexivity.
-  cbn [spine_head spine_args]. unfold apps in *. rewrite fold_left_app. cbn. now rewrite IHt1.
-Qed.
 
 Lemma pis_app : forall As Bs t, pis (As ++ Bs) t = pis As (pis Bs t).
 Proof. induction As as [|A As IH]; intros Bs t; cbn; [reflexivity | now rewrite IH]. Qed.
@@ -250,13 +266,13 @@ Section Rebuild.
     classify_con D p q mode c l t = Ok (fs, us) ->
     pis (field_types D p l fs) (apps (Const (Ind D)) (vars (l + length fs) p ++ us)) = t.
   Proof.
-    intros c t. induction t; intros l fs us H; cbn [classify_con] in H.
+    intros c t. induction t; intros l0 fs us H; cbn [classify_con] in H.
     all: lazymatch goal with
          | |- _ = Pi ?A ?B =>
              bind_in H fd Hf; bind_in H r Hr; destruct r as [fs' us'];
              injection H as <- <-; cbn [field_types pis length];
              rewrite (classify_field_rebuilds _ _ _ _ Hf);
-             replace (l + S (length fs')) with (S l + length fs') by lia;
+             replace (l0 + S (length fs')) with (S l0 + length fs') by lia;
              now rewrite (IHt2 _ _ _ Hr)
          | |- _ =>
              bind_in H u Hfam; apply require_ok in Hfam; bind_in H vs Hargs;
@@ -279,7 +295,7 @@ Qed.
 Theorem classify_decl_faithful : forall mode d desc,
   classify_decl_with mode d = Ok desc ->
   ind_name desc = rd_name d /\
-  ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (Univ (rd_level d))) /\
+  ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (rd_sort d)) /\
   Forall2 (fun rc cd => ctor_name cd = rc_name rc /\ ctor_type desc cd = pis (rd_params d) (rc_type rc))
     (rd_ctors d) (ind_ctors desc).
 Proof.
@@ -324,7 +340,7 @@ Lemma classify_con_free : forall D p q c t l fs us,
   classify_con D p q Checked c l t = Ok (fs, us) ->
   forallb (field_free D) fs && forallb (free_of D) us = true.
 Proof.
-  intros D p q c t. induction t; intros l fs us H; cbn [classify_con] in H.
+  intros D p q c t. induction t; intros l0 fs us H; cbn [classify_con] in H.
   all: first
     [ bind_in H fd Hf; bind_in H r Hr; destruct r as [fs' us'];
       injection H as <- <-; cbn [forallb];

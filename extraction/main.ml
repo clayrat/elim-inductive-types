@@ -4,7 +4,9 @@
    programs compiled directly and through it, with their equations and
    the conversions that prove them, and the refusals.  Then W-types: copy,
    whose call is on a functional field, and the refused transfer of
-   induction to ℕ_W.
+   induction to ℕ_W.  Last, for the lecture on Prop: declarations in Prop,
+   their categories of elimination, the refused large eliminations, and
+   two proofs told apart in the mode BypassElim.
 
    An eliminator type prints its motive as P; an ι-rule names the methods
    after their constructors (m_zero, m_succ, …) and the fields x, y, z, …
@@ -31,16 +33,19 @@ let classified raw =
   | Ok d -> d
   | Err e -> failwith ("not classified: " ^ pp_decl_error e)
 
-(* The description, the eliminator at the given levels, the method types
-   and the ι-rules at level 0. *)
-let show_declaration ?(levels = [ 0 ]) raw =
+(* The description, the eliminator into the given sorts, the method types
+   and the ι-rules into the first sort, if any. *)
+let show_declaration ?(sorts = [ Univ 0 ]) raw =
   let d = classified raw in
   List.iter line (pp_desc ~depth d);
-  List.iter (fun j -> line (elim_name d j ^ " : " ^ pp_elim_type ~depth d j)) levels;
+  List.iter (fun s -> line (elim_name d s ^ " : " ^ pp_elim_type ~depth d s)) sorts;
   line "methods:";
   List.iter (fun c -> line ("  " ^ c.ctor_name ^ ": " ^ pp_method ~depth d c)) d.ind_ctors;
-  line "ι-rules:";
-  List.iter (fun r -> line ("  " ^ pp_rule ~depth d r)) (iota_rules d 0)
+  match sorts with
+  | s :: _ ->
+      line "ι-rules:";
+      List.iter (fun r -> line ("  " ^ pp_rule ~depth d r)) (iota_rules d s)
+  | [] -> ()
 
 let show_registration (log, answer) =
   List.iter (fun s -> line ("  " ^ s)) (pp_log log);
@@ -109,17 +114,17 @@ let () =
 
   (* ℕ *)
   header "ℕ as the first declaration: the motive in place of the result type";
-  show_declaration ~levels:[ 0; 1 ] raw_nat;
+  show_declaration ~sorts:[ Univ 0; Univ 1 ] raw_nat;
   header "ℕ registered: the stages of the plan";
-  let nat_run = declare_checked predicative fuel [] raw_nat [ 0 ] in
+  let nat_run = declare_checked predicative fuel [] raw_nat [ Univ 0 ] in
   show_registration nat_run;
   let d = classified raw_nat in
-  let succ_rule = List.nth (iota_rules d 0) 1 in
+  let succ_rule = List.nth (iota_rules d (Univ 0)) 1 in
   header "The ι-rule of succ, right side, checked where elimNat[0] has no active rules";
   line (pp_rule ~depth d succ_rule);
   (* After the context and the expected type are validated: the term. *)
   let rec from_term = function EvTerm _ :: _ as evs -> evs | _ :: evs -> from_term evs | [] -> [] in
-  (match List.assoc_opt (AtRuleRhs ("Nat", 0, "succ")) (fst nat_run) with
+  (match List.assoc_opt (AtRuleRhs ("Nat", Univ 0, "succ")) (fst nat_run) with
    | Some events ->
        List.iter
          (fun ev -> line (pp_event ~depth ~ctx:succ_rule.rule_ctx ~names:(rule_names d succ_rule) ev))
@@ -132,7 +137,7 @@ let () =
   header "Vectors: the parameter A against the index n";
   show_declaration raw_vec;
   header "Vectors registered over ℕ";
-  show_registration (declare_checked predicative fuel sg_nat0 raw_vec [ 0 ]);
+  show_registration (declare_checked predicative fuel sg_nat0 raw_vec [ Univ 0 ]);
 
   (* Binary trees *)
   header "Binary trees: left, ih_left, right, ih_right";
@@ -140,9 +145,9 @@ let () =
 
   (* Positivity *)
   header "Why the restrictions: the negative field mk : (D → Void) → D";
-  line (pp_registration ~depth (snd (declare_checked predicative fuel [] raw_negative [ 0 ])));
+  line (pp_registration ~depth (snd (declare_checked predicative fuel [] raw_negative [ Univ 0 ])));
   header "The non-strictly positive field mk : ((D → Bool) → Bool) → D";
-  line (pp_registration ~depth (snd (declare_checked predicative fuel [] raw_non_strict [ 0 ])));
+  line (pp_registration ~depth (snd (declare_checked predicative fuel [] raw_non_strict [ Univ 0 ])));
   header "In the bypass mode: D, its eliminator, unmk and δ := λd. unmk d d";
   show_registration void_diagonal;
   let delta = Const (Def "delta") and mk = Const (Ctor ("D", "mk")) in
@@ -164,7 +169,7 @@ let () =
   (* The primitives *)
   header "Void, Unit and Bool against the primitives of lecture 6";
   List.iter (fun (name, desc, schema) ->
-      line (name ^ ": " ^ pp_binders ~depth [ Some "P" ] (to_prim (elim_type desc 0)));
+      line (name ^ ": " ^ pp_binders ~depth [ Some "P" ] (to_prim (elim_type desc (Univ 0))));
       line ("  the schema: " ^ pp_binders ~depth [ Some "P" ] (build [] schema)))
     [ "Void", void_desc, void_schema 0; "Unit", unit_desc, unit_schema 0; "Bool", bool_desc, bool_schema 0 ];
 
@@ -296,4 +301,30 @@ let () =
   line "#0 = s, #1 = z, #2 = P, each one more past the binder f";
   let names = [ "s"; "z"; "P" ] in
   List.iter (fun ev -> line (pp_event ~depth ~names ev)) (from_term (fst ind_false_run));
-  line (pp_answer ~depth ~names:("h" :: "f" :: names) (fun () -> "") (snd ind_false_run))
+  line (pp_answer ~depth ~names:("h" :: "f" :: names) (fun () -> "") (snd ind_false_run));
+
+  (* Propositions *)
+  print_newline ();
+  print_endline "Propositions: declarations in Prop and the sorts of their eliminators.";
+  header "eq: the right side is an index, refl has no field";
+  show_declaration ~sorts:[ Univ 0; Prp ] raw_eq;
+  header "Registered on the hierarchy with Prop: the category of each declaration";
+  let logic_sg = sg_of logic_run in
+  List.iter (fun d ->
+      line (d ^ ": " ^ match category logic_sg d with Some c -> pp_elim_class c | None -> "not declared"))
+    [ "True"; "False"; "eq"; "and"; "AccP"; "or"; "ex" ];
+  line (pp_registration ~depth (snd logic_run));
+  header "Large elimination refused where a proof would be observed";
+  refused (run_registration (declare_elim predicative_prop fuel logic_sg "or" (Univ 0)));
+  refused (run_registration (declare_elim predicative_prop fuel logic_sg "ex" (Univ 0)));
+  refused (declare_checked predicative_prop fuel [] raw_boolp [ Prp; Univ 0 ]);
+  header "A witness in Type₁: ex1 in Prop registered, its extraction refused; in Type₀ the field is refused";
+  line (pp_registration ~depth (snd (declare_checked predicative_prop fuel [] raw_ex1 [ Prp ])));
+  refused (run_registration (declare_elim predicative_prop fuel sg_ex1 "ex1" (Univ 1)));
+  refused (declare_checked predicative_prop fuel [] raw_sigT0 []);
+  header "In the mode BypassElim: elimBoolP[0] registered, two proofs of BoolP observed";
+  show_registration boolp_bypassed;
+  List.iter (fun p ->
+      let t = observe_proof p in
+      line (pp_term ~depth (build [] t) ^ ": " ^ eval sg_bypass t))
+    [ trueP; falseP ]

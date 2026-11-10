@@ -7,7 +7,7 @@
    among them one for every diagnostic of elaboration and the splits of
    the primitive types. *)
 
-open Looping
+open Named
 open Recursion_native
 module P = Pts_native
 module Co = Constants

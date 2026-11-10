@@ -21,9 +21,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import Nat.
@@ -59,8 +58,8 @@ Definition sg_half : signature := sg_of half_run.
     the body and the three equations. *)
 Example half_stages :
   map fst (fst half_run) =
-  [AtMotive "half" "n"; AtElimType "Nat" 1; AtRuleLhs "Nat" 1 "zero"; AtRuleRhs "Nat" 1 "zero";
-   AtRuleLhs "Nat" 1 "succ"; AtRuleRhs "Nat" 1 "succ";
+  [AtMotive "half" "n"; AtElimType "Nat" (Univ 1); AtRuleLhs "Nat" (Univ 1) "zero"; AtRuleRhs "Nat" (Univ 1) "zero";
+   AtRuleLhs "Nat" (Univ 1) "succ"; AtRuleRhs "Nat" (Univ 1) "succ";
    AtDefType "Below_Nat_0"; AtDefBody "Below_Nat_0"; AtDefType "build_Nat_0"; AtDefBody "build_Nat_0";
    AtDefType "recBelow_Nat_0"; AtDefBody "recBelow_Nat_0";
    AtMotive "half" "n"; AtMotive "half" "m"; AtDefType "half"; AtDefBody "half";
@@ -73,10 +72,10 @@ Example half_body :
   option_map snd (sig_def sg_half "half") =
     Some (build [] (λ "n", NConst (Def "recBelow_Nat_0") (λ "_", Nat)
       (λ "n", λ "t",
-         NConst (Elim "Nat" 0) (λ "m", Π "t" : NConst (Def "Below_Nat_0") (λ "_", Nat) "m", Nat)
+         NConst (Elim "Nat" (Univ 0)) (λ "m", Π "t" : NConst (Def "Below_Nat_0") (λ "_", Nat) "m", Nat)
            (λ "t", zero)
            (λ "m", λ "ih", λ "t",
-              NConst (Elim "Nat" 0) (λ "k", Π "t" : NConst (Def "Below_Nat_0") (λ "_", Nat) (succ "k"), Nat)
+              NConst (Elim "Nat" (Univ 0)) (λ "k", Π "t" : NConst (Def "Below_Nat_0") (λ "_", Nat) (succ "k"), Nat)
                 (λ "t", zero)
                 (λ "k", λ "ih", λ "t", succ (NFst (NSnd "t")))
                 "m" "t")
@@ -109,10 +108,10 @@ Definition sg_even : signature := sg_of even_run.
 Example even_stages :
   map fst (fst even_run) =
   [AtMotive "isEven" "n"; AtIndType "Unit_1"; AtCtorType "Unit_1" "tt_1";
-   AtElimType "Nat" 2; AtRuleLhs "Nat" 2 "zero"; AtRuleRhs "Nat" 2 "zero";
-   AtRuleLhs "Nat" 2 "succ"; AtRuleRhs "Nat" 2 "succ";
-   AtElimType "Nat" 1; AtRuleLhs "Nat" 1 "zero"; AtRuleRhs "Nat" 1 "zero";
-   AtRuleLhs "Nat" 1 "succ"; AtRuleRhs "Nat" 1 "succ";
+   AtElimType "Nat" (Univ 2); AtRuleLhs "Nat" (Univ 2) "zero"; AtRuleRhs "Nat" (Univ 2) "zero";
+   AtRuleLhs "Nat" (Univ 2) "succ"; AtRuleRhs "Nat" (Univ 2) "succ";
+   AtElimType "Nat" (Univ 1); AtRuleLhs "Nat" (Univ 1) "zero"; AtRuleRhs "Nat" (Univ 1) "zero";
+   AtRuleLhs "Nat" (Univ 1) "succ"; AtRuleRhs "Nat" (Univ 1) "succ";
    AtDefType "Below_Nat_1"; AtDefBody "Below_Nat_1"; AtDefType "build_Nat_1"; AtDefBody "build_Nat_1";
    AtDefType "recBelow_Nat_1"; AtDefBody "recBelow_Nat_1";
    AtMotive "isEven" "n"; AtMotive "isEven" "m"; AtDefType "isEven"; AtDefBody "isEven";
@@ -134,6 +133,6 @@ Proof. repeat split; vm_compute; reflexivity. Qed.
     method of [zero] (Tests.history_needs_unit_1). *)
 Definition unit_history_run : list (stage * list event) * registration :=
   run_registration (
-    let! sg := ensure_elim predicative prog_fuel sg_nat0 "Nat" 2 in
-    define predicative prog_fuel sg "Below_Nat_1" (below_type nat_desc 1)
-      (build [] (λ "P", NConst (Elim "Nat" 2) (λ "_", Type@ 1) NUnit (λ "n", λ "ih", "P" "n" ⨯ "ih")))).
+    let! sg := ensure_elim predicative prog_fuel sg_nat0 "Nat" (Univ 2) in
+    define predicative prog_fuel sg "Below_Nat_1" (below_type nat_desc 1 1)
+      (build [] (λ "P", NConst (Elim "Nat" (Univ 2)) (λ "_", Type@ 1) NUnit (λ "n", λ "ih", "P" "n" ⨯ "ih")))).

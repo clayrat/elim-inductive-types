@@ -16,9 +16,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import Nat.
@@ -33,9 +32,6 @@ Definition num (n : nat) : nterm := Nat.iter n succ zero.
 (** Two named terms convert, their names free. *)
 Definition converts (sg : signature) (names : list string) (t u : nterm) : bool :=
   match convert sg prog_fuel (build names t) (build names u) with ConvEqual _ => true | _ => false end.
-
-Definition sg_of (r : list (stage * list event) * registration) : signature :=
-  match registered r with Some sg => sg | None => ∅ end.
 
 Definition plus : nterm := NConst (Def "plus").
 Definition pow : nterm := NConst (Def "pow").
@@ -70,8 +66,8 @@ Definition sg_direct : signature := sg_of direct_run.
 Example direct_stages :
   map fst (fst direct_run) =
   [AtMotive "plus" "n"; AtDefType "plus"; AtDefBody "plus"; AtEquation "plus" 0; AtEquation "plus" 1;
-   AtMotive "pow" "n"; AtElimType "Nat" 1; AtRuleLhs "Nat" 1 "zero"; AtRuleRhs "Nat" 1 "zero";
-   AtRuleLhs "Nat" 1 "succ"; AtRuleRhs "Nat" 1 "succ"; AtDefType "pow"; AtDefBody "pow";
+   AtMotive "pow" "n"; AtElimType "Nat" (Univ 1); AtRuleLhs "Nat" (Univ 1) "zero"; AtRuleRhs "Nat" (Univ 1) "zero";
+   AtRuleLhs "Nat" (Univ 1) "succ"; AtRuleRhs "Nat" (Univ 1) "succ"; AtDefType "pow"; AtDefBody "pow";
    AtEquation "pow" 0; AtEquation "pow" 1;
    AtMotive "f" "n"; AtDefType "f"; AtDefBody "f"; AtEquation "f" 0; AtEquation "f" 1].
 Proof. vm_compute. reflexivity. Qed.
@@ -81,11 +77,11 @@ Proof. vm_compute. reflexivity. Qed.
     the varying [b] under Π, the hypothesis applied to [succ b]. *)
 Example direct_bodies :
   option_map snd (sig_def sg_direct "plus") =
-    Some (build [] (λ "n", λ "m", NConst (Elim "Nat" 0) (λ "_", Nat) "m" (λ "k", λ "ih", succ "ih") "n")) /\
+    Some (build [] (λ "n", λ "m", NConst (Elim "Nat" (Univ 0)) (λ "_", Nat) "m" (λ "k", λ "ih", succ "ih") "n")) /\
   option_map snd (sig_def sg_direct "pow") =
-    Some (build [] (λ "n", NConst (Elim "Nat" 1) (λ "_", Type@ 0) NUnit (λ "k", λ "ih", Nat ⨯ "ih") "n")) /\
+    Some (build [] (λ "n", NConst (Elim "Nat" (Univ 1)) (λ "_", Type@ 0) NUnit (λ "k", λ "ih", Nat ⨯ "ih") "n")) /\
   option_map snd (sig_def sg_direct "f") =
-    Some (build [] (λ "n", λ "b", NConst (Elim "Nat" 0) (λ "n", Π "b" : Nat, pow "n") (λ "b", NTt)
+    Some (build [] (λ "n", λ "b", NConst (Elim "Nat" (Univ 0)) (λ "n", Π "b" : Nat, pow "n") (λ "b", NTt)
                      (λ "k", λ "ih", λ "b", ⟨ "b", "ih" (succ "b") ⟩) "n" "b")).
 Proof. repeat split; vm_compute; reflexivity. Qed.
 

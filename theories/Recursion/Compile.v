@@ -205,6 +205,12 @@ Section Calls.
     | Pair a b => let* a' := sub d a in let* b' := sub d b in Ok (Done (Pair a' b'))
     | Fst u => let* u' := sub d u in Ok (Done (Fst u'))
     | Snd u => let* u' := sub d u in Ok (Done (Snd u'))
+    | Case D s P x bs =>
+        let* P' := sub d P in
+        let* x' := sub d x in
+        let* bs' := mapM (sub d) bs in
+        Ok (Done (Case D s P' x' bs'))
+    | Fix A k b => let* A' := sub d A in let* b' := sub (S d) b in Ok (Done (Fix A' k b'))
     | Srt _ | Var _ | Void | Unit | Tt | Bool | BTrue | BFalse | Const _ => Ok (Done t)
     end.
 
@@ -269,7 +275,7 @@ Section Translate.
         let tail := map (var_at N) (gn_tail gn) in
         match sv_prim sv with
         | None =>
-            tret (apps (Const (Elim D k)) (sv_params sv ++ [motive gn] ++ fst ms ++ seeds ++ tail),
+            tret (apps (Const (Elim D (Univ k))) (sv_params sv ++ [motive gn] ++ fst ms ++ seeds ++ tail),
                   (D, k) :: snd ms)
         | Some pr =>
             let C := Ann (motive gn) (Pi (prim_type pr) (Srt (Univ k))) in
@@ -377,7 +383,7 @@ Section Compile.
               end in
     let '(sg1, root, needed, e) := r in
     let! _ := if splits_struct e then tret tt else refuse (RCase (CUnsplit x)) in
-    let! sg2 := tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D k) sg1 needed in
+    let! sg2 := tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D (Univ k)) sg1 needed in
     tret (sg2, pis (map b_type (rev G0)) goal0, lams N root, out e).
 
   (** With the equations of the tree. *)
@@ -447,18 +453,8 @@ Section Sound.
   Variable Sp : spec.
   Variable fuel : nat.
 
-  Lemma ensure_below_extends : forall sg D j log log' sg',
-    ensure_below Sp fuel sg D j log = (log', Ok sg') -> exists es, sig_entries sg' = es ++ sig_entries sg.
-  Proof.
-    intros sg D j log log' sg' H.
-    destruct (ensure_below_sound _ _ _ _ _ _ _ _ H) as [-> | (d & sg3 & sg4 & sg5 & _ & [es E3] & D4 & D5 & D6)];
-      [now exists [] | ].
-    destruct D4 as (_ & _ & _ & E4), D5 as (_ & _ & _ & E5), D6 as (_ & _ & _ & E6).
-    eexists. rewrite E6, E5, E4, E3. now rewrite !app_comm_cons.
-  Qed.
-
   Lemma instances_extend : forall needed sg log log' sg',
-    tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D k) sg needed log = (log', Ok sg') ->
+    tfold (fun sg '(D, k) => ensure_elim Sp fuel sg D (Univ k)) sg needed log = (log', Ok sg') ->
     exists es, sig_entries sg' = es ++ sig_entries sg.
   Proof.
     induction needed as [|[D k] needed IH]; intros sg log log' sg' H; cbn in H.

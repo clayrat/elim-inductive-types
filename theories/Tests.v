@@ -15,14 +15,19 @@
     refusal arises at its stage; a rule broken by hand is caught in the
     temporary signature, where its left side does not compute; [Unit_ℓ] is
     declared at level ℓ, and the primitive Unit does not stand for it.
+    The kernel's [nat_rect], written with [fix] and [match] (CIC/Match.v
+    of the kernel), has the type generated for [elimNat[j]] and checks
+    against it in the signature registered for ℕ.
 
     The history: for ℕ, vectors, binary trees, W-types, [Tr] and a family
     of types in [Type₁], [Below_D], [build_D] and [recBelow_D] register
     with what they need, and compute to the formulas of the lecture on
     open terms; the history of a motive in [Type₁] is refused with the
-    primitive [Unit : Type₀] in place of [Unit_1], and [shadow], a family
+    primitive [Unit : Type₀] in place of [Unit_1]; [shadow], a family
     indexed by a [Below_D_0] defined by hand, whose history at 0 would
-    shadow it and is refused, its name taken.
+    shadow it and is refused, its name taken; and the history of a
+    proposition with a recursive field over [Type₀], one level above its
+    motive.
 
     Case trees: elaborated, the leaves of [half], [append] and of
     splits of vectors, W-types, binary trees and [Tr] have the names,
@@ -57,10 +62,10 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Finite Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants Families.
+From DepTypes.CIC Require Match.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Data Require Import Nat Lists Tree W.
 From IndTypes.Recursion Require Import Below CaseTree Compile.
@@ -78,7 +83,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition raw_tr : raw_decl := {|
   rd_name := "Tr"; rd_params := [Srt (Univ 0); build ["A"] ("A" ~> "A" ~> "A")];
-  rd_indices := [build ["h"; "A"] "A"]; rd_level := 0;
+  rd_indices := [build ["h"; "A"] "A"]; rd_sort := Univ 0;
   rd_ctors := [
     mk_raw_ctor "leaf" (build ["h"; "A"] (Π "a" : "A", Tr "A" "h" "a"));
     mk_raw_ctor "node" (build ["h"; "A"]
@@ -98,7 +103,7 @@ Proof. vm_compute. reflexivity. Qed.
 Definition E : nterm := NConst (Ind "E").
 
 Definition one (params indices : list term) (c : term) : raw_decl := {|
-  rd_name := "E"; rd_params := params; rd_indices := indices; rd_level := 0;
+  rd_name := "E"; rd_params := params; rd_indices := indices; rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "c" c] |}.
 
 (** A recursive field whose domain mentions D is negative. *)
@@ -146,14 +151,14 @@ Example self_reference :
 Proof. vm_compute. reflexivity. Qed.
 
 Example duplicate_constructor :
-  classify_decl {| rd_name := "E"; rd_params := []; rd_indices := []; rd_level := 0;
+  classify_decl {| rd_name := "E"; rd_params := []; rd_indices := []; rd_sort := Univ 0;
                    rd_ctors := [mk_raw_ctor "c" (build [] E); mk_raw_ctor "c" (build [] E)] |}
   = Err (EDuplicateCtor "c").
 Proof. vm_compute. reflexivity. Qed.
 
 (** ** Generation *)
 
-Example tr_elim_generated : elim_type tr_desc 0 = build [] elim_tr_ty.
+Example tr_elim_generated : elim_type tr_desc (Univ 0) = build [] elim_tr_ty.
 Proof. vm_compute. reflexivity. Qed.
 
 Definition accepted (a : answer unit) : bool := match a with Accepted _ => true | _ => false end.
@@ -166,13 +171,13 @@ Definition rule_holds (sg : signature) (r : iota_rule) : bool :=
   accepted (snd (run_check predicative sg 300 (rule_ctx r) (rule_rhs r) (rule_type r))).
 
 Example generated_rules_hold :
-  forallb (rule_holds sg_nat) (iota_rules nat_desc 0) &&
+  forallb (rule_holds sg_nat) (iota_rules nat_desc (Univ 0)) &&
   forallb (rule_holds sg_families)
-    (iota_rules vec_desc 0 ++ iota_rules w_desc 0 ++ iota_rules tr_desc 0) = true.
+    (iota_rules vec_desc (Univ 0) ++ iota_rules w_desc (Univ 0) ++ iota_rules tr_desc (Univ 0)) = true.
 Proof. vm_compute. reflexivity. Qed.
 
 Example rule_counts :
-  map (fun d => length (iota_rules d 0)) [nat_desc; vec_desc; w_desc; tr_desc] = [2; 2; 1; 4].
+  map (fun d => length (iota_rules d (Univ 0))) [nat_desc; vec_desc; w_desc; tr_desc] = [2; 2; 1; 4].
 Proof. reflexivity. Qed.
 
 (** ** Registration *)
@@ -183,20 +188,20 @@ Definition fuel : nat := 300.
     signature. *)
 Definition sg_registered : list (stage * list event) * registration :=
   run_registration (
-    let! s1 := declare predicative fuel ∅ raw_nat [0] in
-    let! s2 := declare predicative fuel s1 raw_vec [0] in
-    let! s3 := declare predicative fuel s2 raw_w [0] in
-    declare predicative fuel s3 raw_tr [0]).
+    let! s1 := declare predicative fuel ∅ raw_nat [Univ 0] in
+    let! s2 := declare predicative fuel s1 raw_vec [Univ 0] in
+    let! s3 := declare predicative fuel s2 raw_w [Univ 0] in
+    declare predicative fuel s3 raw_tr [Univ 0]).
 
 Example families_registered :
   option_map sig_entries (registered sg_registered) = Some family_entries.
 Proof. vm_compute. reflexivity. Qed.
 
 Example refusals :
-  refusal (declare_checked predicative fuel sg_nat0 raw_nat [0]) = Some (RTaken (Ind "Nat")) /\
-  refusal (run_registration (declare_elim predicative fuel sg_nat0 "Nat" 0)) = Some (RTaken (Elim "Nat" 0)) /\
-  refusal (run_registration (declare_elim predicative fuel sg_nat0 "Foo" 0)) = Some (RUndeclared "Foo") /\
-  refusal (declare_checked system_u_minus fuel ∅ raw_nat [0])
+  refusal (declare_checked predicative fuel sg_nat0 raw_nat [Univ 0]) = Some (RTaken (Ind "Nat")) /\
+  refusal (run_registration (declare_elim predicative fuel sg_nat0 "Nat" (Univ 0))) = Some (RTaken (Elim "Nat" (Univ 0))) /\
+  refusal (run_registration (declare_elim predicative fuel sg_nat0 "Foo" (Univ 0))) = Some (RUndeclared "Foo") /\
+  refusal (declare_checked system_u_minus fuel ∅ raw_nat [Univ 0])
     = Some (RRejected (AtIndType "Nat") (ENotInSystem (Univ 0))).
 Proof. repeat split; vm_compute; reflexivity. Qed.
 
@@ -204,7 +209,7 @@ Proof. repeat split; vm_compute; reflexivity. Qed.
     a field that is no type is refused at the type of its constructor. *)
 Example field_refusals :
   refusal (declare_checked predicative fuel ∅ (one [] [] (build [] (Type@ 0 ~> E))) [])
-    = Some (RLevel "c" 0 (Univ 1) 0) /\
+    = Some (RLevel "c" 0 (Univ 1) (Univ 0)) /\
   refusal (declare_checked predicative fuel ∅ (one [] [] (build [] (NTt ~> E))) [])
     = Some (RRejected (AtCtorType "E" "c") (ENotASort Tt Unit)).
 Proof. split; vm_compute; reflexivity. Qed.
@@ -213,9 +218,9 @@ Proof. split; vm_compute; reflexivity. Qed.
     checked in the temporary signature: there the instance has no active
     rules, its left side stays neutral, and the right side is refused. *)
 Definition tmp_nat : signature :=
-  match sig_add sg_nat0 (EElim "Nat" 0 (elim_type nat_desc 0) false) with Some sg => sg | None => ∅ end.
+  match sig_add sg_nat0 (EElim "Nat" (Univ 0) (elim_type nat_desc (Univ 0)) false) with Some sg => sg | None => ∅ end.
 
-Definition succ_rule : iota_rule := nth 1 (iota_rules nat_desc 0) (iota_rule_of nat_desc 0 0 (nth 0 (ind_ctors nat_desc) (mk_ctor "" [] []))).
+Definition succ_rule : iota_rule := nth 1 (iota_rules nat_desc (Univ 0)) (iota_rule_of nat_desc (Univ 0) 0 (nth 0 (ind_ctors nat_desc) (mk_ctor "" [] []))).
 
 Definition broken (r : iota_rule) : iota_rule :=
   {| rule_ctor := rule_ctor r; rule_ctx := rule_ctx r; rule_lhs := rule_lhs r;
@@ -223,11 +228,11 @@ Definition broken (r : iota_rule) : iota_rule :=
 
 Example broken_rule_caught :
   normalize tmp_nat fuel (rule_lhs succ_rule) = NormalForm (rule_lhs succ_rule) /\
-  match snd (run_traced (check_rule predicative fuel tmp_nat "Nat" 0 (broken succ_rule))) with
-  | Err (Refuse (RRejected (AtRuleRhs "Nat" 0 "succ") _)) => True
+  match snd (run_traced (check_rule predicative fuel tmp_nat "Nat" (Univ 0) (broken succ_rule))) with
+  | Err (Refuse (RRejected (AtRuleRhs "Nat" (Univ 0) "succ") _)) => True
   | _ => False
   end /\
-  snd (run_traced (check_rule predicative fuel tmp_nat "Nat" 0 succ_rule)) = Ok tt.
+  snd (run_traced (check_rule predicative fuel tmp_nat "Nat" (Univ 0) succ_rule)) = Ok tt.
 Proof. split; [ | split]; vm_compute; trivial. Qed.
 
 (** [Unit_ℓ]: the primitive at level 0, a declaration above. *)
@@ -236,8 +241,8 @@ Definition sg_unit1 : signature :=
 
 Example units :
   unit_at 0 = Unit /\ tt_at 0 = Tt /\
-  map (fun e => match e with EInd d => Some (ind_name d, ind_level d) | _ => None end) (sig_entries sg_unit1)
-    = [Some ("Unit_1", 1)] /\
+  map (fun e => match e with EInd d => Some (ind_name d, ind_sort d) | _ => None end) (sig_entries sg_unit1)
+    = [Some ("Unit_1", Univ 1)] /\
   snd (run_check predicative sg_unit1 fuel [] (tt_at 1) (unit_at 1)) = Accepted tt /\
   snd (run_infer predicative sg_unit1 fuel [] (unit_at 1)) = Accepted (Srt (Univ 1)) /\
   (match snd (run_traced (ensure_unit predicative fuel sg_unit1 1)) with
@@ -253,6 +258,19 @@ Example no_cumulativity :
     = Rejected (EMismatch Tt (unit_at 1) Unit).
 Proof. split; vm_compute; reflexivity. Qed.
 
+(** The kernel's [nat_rect] at the level [j], written with [fix] and
+    [match], is annotated with the type generated for [elimNat[j]], and
+    checks against it in the signature registered by algorithm 1. *)
+Example nat_rect_against_generated :
+  forallb (fun j =>
+    term_eqb (build [] (Match.nat_rect_ty j)) (elim_type nat_desc (Univ j)) &&
+    match snd (run_check predicative sg_nat0 fuel [] (build [] (Match.nat_rect j))
+                 (elim_type nat_desc (Univ j))) with
+    | Accepted _ => true
+    | _ => false
+    end) [0; 1; 2] = true.
+Proof. vm_compute. reflexivity. Qed.
+
 (** ** The history *)
 
 (** For ℕ, as in the lecture: [Below] by [elimNat[j+1]] with the motive
@@ -260,10 +278,10 @@ Proof. split; vm_compute; reflexivity. Qed.
     [h := build n]. *)
 Example below_nat :
   below_body nat_desc 1 =
-    build [] (λ "P", NConst (Elim "Nat" 2) (λ "_", Type@ 1) (NConst (Ind "Unit_1"))
+    build [] (λ "P", NConst (Elim "Nat" (Univ 2)) (λ "_", Type@ 1) (NConst (Ind "Unit_1"))
                        (λ "n", λ "ih", "P" "n" ⨯ "ih")) /\
-  build_body nat_desc 0 =
-    build [] (λ "P", λ "s", NConst (Elim "Nat" 0)
+  build_body nat_desc 0 0 =
+    build [] (λ "P", λ "s", NConst (Elim "Nat" (Univ 0))
                 (λ "n", "P" "n" ⨯ NConst (Def "Below_Nat_0") "P" "n")
                 ⟨ "s" zero NTt, NTt ⟩
                 (λ "n", λ "h", ⟨ "s" (succ "n") "h", "h" ⟩)).
@@ -274,10 +292,10 @@ Proof. split; vm_compute; reflexivity. Qed.
 Example below_stages :
   map fst (fst (run_registration (ensure_below predicative fuel sg_nat0 "Nat" 1))) =
   [AtIndType "Unit_1"; AtCtorType "Unit_1" "tt_1";
-   AtElimType "Nat" 2; AtRuleLhs "Nat" 2 "zero"; AtRuleRhs "Nat" 2 "zero";
-   AtRuleLhs "Nat" 2 "succ"; AtRuleRhs "Nat" 2 "succ";
-   AtElimType "Nat" 1; AtRuleLhs "Nat" 1 "zero"; AtRuleRhs "Nat" 1 "zero";
-   AtRuleLhs "Nat" 1 "succ"; AtRuleRhs "Nat" 1 "succ";
+   AtElimType "Nat" (Univ 2); AtRuleLhs "Nat" (Univ 2) "zero"; AtRuleRhs "Nat" (Univ 2) "zero";
+   AtRuleLhs "Nat" (Univ 2) "succ"; AtRuleRhs "Nat" (Univ 2) "succ";
+   AtElimType "Nat" (Univ 1); AtRuleLhs "Nat" (Univ 1) "zero"; AtRuleRhs "Nat" (Univ 1) "zero";
+   AtRuleLhs "Nat" (Univ 1) "succ"; AtRuleRhs "Nat" (Univ 1) "succ";
    AtDefType "Below_Nat_1"; AtDefBody "Below_Nat_1"; AtDefType "build_Nat_1"; AtDefBody "build_Nat_1";
    AtDefType "recBelow_Nat_1"; AtDefBody "recBelow_Nat_1"].
 Proof. vm_compute. reflexivity. Qed.
@@ -295,18 +313,18 @@ Proof. split; vm_compute; reflexivity. Qed.
 Definition Tel : nterm := NConst (Ind "Tel").
 
 Definition raw_tel : raw_decl := {|
-  rd_name := "Tel"; rd_params := []; rd_indices := []; rd_level := 1;
+  rd_name := "Tel"; rd_params := []; rd_indices := []; rd_sort := Univ 1;
   rd_ctors := [mk_raw_ctor "tnil" (build [] Tel); mk_raw_ctor "tcons" (build [] (Type@ 0 ~> Tel ~> Tel))] |}.
 
 (** The families with their histories for motives in [Type₀], and ℕ also
     for motives in [Type₁]. *)
 Definition sg_history : signature :=
   match registered (run_registration (
-    let! s1 := declare predicative fuel ∅ raw_nat [0] in
-    let! s2 := declare predicative fuel s1 raw_vec [0] in
-    let! s3 := declare predicative fuel s2 raw_tree [0] in
-    let! s4 := declare predicative fuel s3 raw_w [0] in
-    let! s5 := declare predicative fuel s4 raw_tr [0] in
+    let! s1 := declare predicative fuel ∅ raw_nat [Univ 0] in
+    let! s2 := declare predicative fuel s1 raw_vec [Univ 0] in
+    let! s3 := declare predicative fuel s2 raw_tree [Univ 0] in
+    let! s4 := declare predicative fuel s3 raw_w [Univ 0] in
+    let! s5 := declare predicative fuel s4 raw_tr [Univ 0] in
     let! s6 := declare predicative fuel s5 raw_tel [] in
     tfold (fun sg '(D, j) => ensure_below predicative fuel sg D j) s6
       [("Nat", 0); ("Vec", 0); ("Tree", 0); ("W", 0); ("Tr", 0); ("Tel", 0); ("Nat", 1)]))
@@ -373,20 +391,20 @@ Proof. vm_compute. trivial. Qed.
 Definition D : nterm := NConst (Ind "D").
 
 Definition raw_d : raw_decl := {|
-  rd_name := "D"; rd_params := []; rd_indices := [build [] (H "Below_D_0")]; rd_level := 0;
+  rd_name := "D"; rd_params := []; rd_indices := [build [] (H "Below_D_0")]; rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "mk" (build [] (Π "n" : H "Below_D_0", D "n"))] |}.
 
 Definition sg_shadow : signature :=
   match registered (run_registration (
     let! s1 := define predicative fuel ∅ "Below_D_0" (Srt (Univ 0)) Unit in
-    declare predicative fuel s1 raw_d [0; 1]))
+    declare predicative fuel s1 raw_d [Univ 0; Univ 1]))
   with Some sg => sg | None => ∅ end.
 
 (** The type of [build_D_0] with the generated [Below_D_0] added. *)
 Definition shadowed_build : option (answer term) :=
   match sig_ind sg_shadow "D" with
   | Some d =>
-      match sig_add sg_shadow (EDef (below_name "D" 0) (below_type d 0) (below_body d 0)) with
+      match sig_add sg_shadow (EDef (below_name "D" 0) (below_type d 0 0) (below_body d 0)) with
       | Some sg4 => Some (snd (run_infer predicative sg4 fuel [] (build_type d 0)))
       | None => None
       end
@@ -394,7 +412,7 @@ Definition shadowed_build : option (answer term) :=
   end.
 
 Example shadow :
-  match sig_def sg_shadow "Below_D_0", sig_elim sg_shadow "D" 0, sig_elim sg_shadow "D" 1 with
+  match sig_def sg_shadow "Below_D_0", sig_elim sg_shadow "D" (Univ 0), sig_elim sg_shadow "D" (Univ 1) with
   | Some (Srt (Univ 0), Unit), Some (_, true), Some (_, true) => True
   | _, _, _ => False
   end /\
@@ -404,6 +422,54 @@ Example shadow :
   end /\
   refusal (run_registration (ensure_below predicative fuel sg_shadow "D" 0)) = Some (RTaken (Def "Below_D_0")).
 Proof. split; [ | split]; vm_compute; [trivial | trivial | reflexivity]. Qed.
+
+(** A proposition bounds the domains of its recursive fields by nothing:
+    [BigP : Prop] with [mkBigP : (Type₀ → BigP) → BigP] is a singleton
+    whose field is a proof, so it eliminates into every sort, and the
+    component [Πy:Type₀. P (f y) × Below P (f y)] of its history lies in
+    [Type₁].  The level of the history of a motive in [Type₀] is 1,
+    inferred at [AtDomain]; at the level [max 0 j] of a declaration in
+    [Type₀] the body of [Below_BigP_0] is refused. *)
+Definition BigP : nterm := NConst (Ind "BigP").
+
+Definition raw_bigp : raw_decl := {|
+  rd_name := "BigP"; rd_params := []; rd_indices := []; rd_sort := Prp;
+  rd_ctors := [mk_raw_ctor "mkBigP" (build [] ((Type@ 0 ~> BigP) ~> BigP))] |}.
+
+Definition sg_bigp : signature :=
+  match registered (declare_checked predicative_prop fuel ∅ raw_bigp [Prp]) with Some sg => sg | None => ∅ end.
+
+Definition bigp_desc : ind_desc := match sig_ind sg_bigp "BigP" with Some d => d | None => nat_desc end.
+
+Definition sg_bigp_history : signature :=
+  match registered (run_registration (ensure_below predicative_prop fuel sg_bigp "BigP" 0)) with
+  | Some sg => sg
+  | None => ∅
+  end.
+
+(** The history at the level of [Type₀]. *)
+Definition bigp_at_0 : list (stage * list event) * registration :=
+  run_registration (
+    let! sg := ensure_elim predicative_prop fuel sg_bigp "BigP" (Univ 1) in
+    define predicative_prop fuel sg "Below_BigP_0" (below_type bigp_desc 0 0) (below_body bigp_desc 0)).
+
+Example bigp_history :
+  ind_elim bigp_desc = AllSorts /\
+  map fst (fst (run_traced (history_level predicative_prop fuel sg_bigp bigp_desc 0)))
+    = [AtDomain "BigP" "mkBigP" 0] /\
+  snd (run_traced (history_level predicative_prop fuel sg_bigp bigp_desc 0)) = Ok 1 /\
+  option_map fst (sig_def sg_bigp_history "Below_BigP_0") = Some (below_type bigp_desc 0 1) /\
+  match convert sg_bigp_history fuel
+          (build ["f"; "P"] (H "Below_BigP_0" "P" (NConst (Ctor "BigP" "mkBigP") "f")))
+          (build ["f"; "P"] (Π "y" : Type@ 0, "P" ("f" "y") ⨯ H "Below_BigP_0" "P" ("f" "y"))) with
+  | ConvEqual _ => true
+  | _ => false
+  end = true /\
+  match refusal bigp_at_0 with
+  | Some (RRejected (AtDefBody "Below_BigP_0") (EMismatch _ _ (Srt (Univ 1)))) => true
+  | _ => false
+  end = true.
+Proof. repeat split; vm_compute; reflexivity. Qed.
 
 (** ** Case trees *)
 
@@ -661,7 +727,7 @@ Definition leaves_check (sg_in : signature) (fn : fun_decl) (body : term -> term
 
 Definition itself (fn : fun_decl) (_ : term) : term := Const (Def (fn_name fn)).
 
-Definition sg_plus2 : signature := Direct.sg_of (compile_all predicative Direct.prog_fuel Append.sg_vec [Append.plus2_fn]).
+Definition sg_plus2 : signature := sg_of (compile_all predicative Direct.prog_fuel Append.sg_vec [Append.plus2_fn]).
 
 (** Every leaf of [half] and [append] checks against its goal, the
     function not computing; with addition on the second argument the leaf
@@ -702,7 +768,7 @@ Proof. split; [ | split]; vm_compute; reflexivity. Qed.
     premises of [Contracts.translation_typed] are therefore for every
     body. *)
 Definition peek : nterm := NConst (Def "peek").
-Definition peek_x : nterm := NConst (Elim "Nat" 0) (λ "_", Nat) zero (λ "_", λ "_", zero) "k".
+Definition peek_x : nterm := NConst (Elim "Nat" (Univ 0)) (λ "_", Nat) zero (λ "_", λ "_", zero) "k".
 Definition peek_fn : fun_decl := {|
   fn_name := "peek";
   fn_args := [("Q", Nat ~> Type@ 0, Constant); ("w", Π "m" : Nat, "Q" "m", Constant); ("n", Nat, Constant)];

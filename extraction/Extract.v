@@ -13,12 +13,12 @@
     and names OCaml strings. *)
 
 From Stdlib Require Import Extraction ExtrOcamlBasic ExtrOcamlNatInt ExtrOcamlNativeString.
-From DepTypes.PTS Require Import Syntax Named Spec Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Spec Signature Eval EvalSrc Check.
 From DepTypes.Configs Require Import Finite Predicative.
 From DepTypes.SystemU Require Import Encodings.
 From DepTypes.MLTT Require Import Constants Families.
 From IndTypes.Elim Require Import Decl Generate Declare.
-From IndTypes.Data Require Import Nat Lists Tree W Primitives Positivity.
+From IndTypes.Data Require Import Nat Lists Tree W Primitives Positivity Logic.
 From IndTypes.Recursion Require Import Below CaseTree Compile.
 From IndTypes.Programs Require Import Direct Half Append Rejected Copy.
 
@@ -40,18 +40,24 @@ Extraction "deptypes.ml"
   apps spine_head spine_args pis lams vars
   sig_empty sig_add sig_type sig_delta ind_type ctor_type field_type elim_arity elim_view full_elim iota
   resolve resolve_ctx
-  lambda_star system_u system_u_minus predicative pure_predicative u_to_univ
+  lambda_star system_u system_u_minus predicative pure_predicative predicative_prop u_to_univ
   classify normalize_trace normalize whnf convert
   infer check run_infer run_check
   observe
-  classify_decl classify_decl_with
+  allows_elimination case_iota case_motive_type case_branch_type fix_unfold full_spine spine_iota has_lams
+  eval_src
+  classify_decl classify_decl_with sort_class sort_level
   motive_type method_type elim_type iota_rules
-  declare declare_with declare_elim ensure_elim check_rule define declare_checked declare_bypassing define_checked run_registration
+  within elim_class_of
+  declare declare_with declare_elim declare_elim_with ensure_elim check_rule define
+  declare_checked declare_bypassing declare_bypassing_elim define_checked run_registration
   registered refusal ensure_unit unit_at tt_at unit_name
   nat_desc elim_nat_ty double_body vec_desc w_desc
   raw_nat sg_nat0 raw_list list_desc raw_vec raw_tree tree_desc raw_w ind_w_run ind_false_run
   raw_void raw_unit raw_bool void_desc unit_desc bool_desc to_prim void_schema unit_schema bool_schema
   raw_negative raw_negative_bool raw_non_strict void_diagonal bool_diagonal sg_void sg_bool
+  logic_fuel raw_true raw_false raw_eq raw_and raw_or raw_ex raw_ex1 raw_accp raw_boolp raw_sig raw_sigT0
+  raw_badp logic_run sg_logic category sg_ex1 boolp_bypassed sg_bypass observe_proof trueP falseP
   ensure_below below_name build_name recbelow_name
   generalize
   compile_checked compile_all named_equations

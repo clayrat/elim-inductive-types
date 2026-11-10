@@ -18,7 +18,7 @@ open Common_native
 open Diagnostics_native
 module E = Elim_native
 module Reg = Registration_native
-module L = Looping
+module L = Named
 
 let ( -! ) a b = max 0 (a - b)
 
@@ -42,15 +42,14 @@ let rec occurs i = function
   | App (a, b) | Ann (a, b) | ElimVoid (a, b) | Pair (a, b) -> occurs i a || occurs i b
   | ElimUnit (c, m, u) -> occurs i c || occurs i m || occurs i u
   | ElimBool (c, x, y, b) -> occurs i c || occurs i x || occurs i y || occurs i b
+  | Fix (a, _, b) -> occurs i a || occurs (i + 1) b
+  | Case (_, _, m, x, bs) -> occurs i m || occurs i x || List.exists (occurs i) bs
 
 (* ** The history *)
 
 let below_name d j = "Below_" ^ d ^ "_" ^ string_of_int j
 let build_name d j = "build_" ^ d ^ "_" ^ string_of_int j
 let recbelow_name d j = "recBelow_" ^ d ^ "_" ^ string_of_int j
-
-(* The level of the history of D for a motive in [Type_j]. *)
-let history_level d j = max d.ind_level j
 
 (* Tuples at the level ℓ: [Unit_ℓ] when empty, a single component alone,
    more nested to the right. *)
@@ -78,9 +77,12 @@ let below_at d j ~params ~motive ~base =
   apps (Const (Def (below_name d.ind_name j)))
     (vars params (nparams d) @ [ Var motive ] @ vars base (nindices d + 1))
 
+(* The constructions for the motive level j at the history level ℓ: the
+   names and the type of P take j, the tuples and the instances ℓ. *)
+
 (* [Π(Δ). ΠP:(Πθ̄. D Δ θ̄ → Type_j). Πθ̄. D Δ θ̄ → Type_ℓ]. *)
-let below_type d j =
-  pis d.ind_params (Pi (E.motive_type d j, over_family d 1 (Srt (Univ (history_level d j)))))
+let below_type d j l =
+  pis d.ind_params (Pi (E.motive_type d (Univ j), over_family d 1 (Srt (Univ l))))
 
 (* [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ] for a recursive field [r] at [bl], after the
    earlier fields at [rbs], with its hypothesis [ih], among [b] binders
@@ -108,9 +110,9 @@ let below_method l c =
   lams b (tuple_type l (List.rev cs))
 
 (* [λΔ P. elim_D[ℓ+1] Δ (λθ̄ x. Type_ℓ) m̄]. *)
-let below_body d j =
-  let p = nparams d and q = nindices d and l = history_level d j in
-  lams p (Lam (apps (Const (Elim (d.ind_name, l + 1)))
+let below_body d l =
+  let p = nparams d and q = nindices d in
+  lams p (Lam (apps (Const (Elim (d.ind_name, Univ (l + 1))))
                  (vars 1 p @ [ lams (q + 1) (Srt (Univ l)) ] @ List.map (below_method l) d.ind_ctors)))
 
 (* [P θ̄ x × Below_D Δ P θ̄ x], after P, step, θ̄ and x. *)
@@ -126,13 +128,13 @@ let step_type d j =
 
 (* [Π(Δ). ΠP. Πstep. Πθ̄. Πx. P θ̄ x × Below_D Δ P θ̄ x]. *)
 let build_type d j =
-  pis d.ind_params (Pi (E.motive_type d j, Pi (step_type d j, over_family d 2 (motive_and_below d j))))
+  pis d.ind_params (Pi (E.motive_type d (Univ j), Pi (step_type d j, over_family d 2 (motive_and_below d j))))
 
 (* [Π(Δ). ΠP. Πstep. Πθ̄. Πx. P θ̄ x]. *)
 let recbelow_type d j =
   let q = nindices d in
   pis d.ind_params
-    (Pi (E.motive_type d j, Pi (step_type d j, over_family d 2 (motive_at_base d ~motive:(q + 2) ~base:0))))
+    (Pi (E.motive_type d (Univ j), Pi (step_type d j, over_family d 2 (motive_at_base d ~motive:(q + 2) ~base:0))))
 
 (* On [c Δ ā] with the tuple [h] of the hypotheses: [(step ū (c Δ ā) h, h)];
    [step] lies right before the binders of the method. *)
@@ -147,9 +149,9 @@ let build_method d l c =
   lams b (Pair (apps (Var b) (List.map (rename (transport_past 2 rbs b)) c.ctor_indices @ [ obj; h ]), h))
 
 (* [λΔ P step. elim_D[ℓ] Δ (λθ̄ x. P θ̄ x × Below_D Δ P θ̄ x) m̄]. *)
-let build_body d j =
-  let p = nparams d and q = nindices d and l = history_level d j in
-  lams p (Lam (Lam (apps (Const (Elim (d.ind_name, l)))
+let build_body d j l =
+  let p = nparams d and q = nindices d in
+  lams p (Lam (Lam (apps (Const (Elim (d.ind_name, Univ l)))
                       (vars 2 p @ [ lams (q + 1) (motive_and_below d j) ]
                        @ List.map (build_method d l) d.ind_ctors))))
 
@@ -160,6 +162,35 @@ let recbelow_body d j =
     (Fst (apps (Const (Def (build_name d.ind_name j)))
             (vars (q + 3) p @ [ Var (q + 2); Var (q + 1) ] @ vars 0 (q + 1))))
 
+(* ** The level
+
+   The component [Πȳ:B̄. P v̄ (r ȳ) × ih ȳ] of a recursive field lies in
+   [Type_ℓ] once ℓ is at least j and the levels of the domains B̄, a proof
+   counting as 0: the level of [Πȳ:B̄. Unit].  [D : Type_i] bounds them by
+   i ([within]), and ℓ is [max i j]; for a proposition they are inferred,
+   at the stage [AtDomain] of the field. *)
+
+(* The largest of [l] and the levels of the domains of the recursive
+   fields among [fs] of [c], from position [k] on, in the context [gamma]
+   of the parameters and the earlier fields. *)
+let rec fields_level r sg d c gamma k fs l =
+  match fs with
+  | [] -> Ok l
+  | fd :: rest ->
+      let* l =
+        match fd with
+        | FRec ((_ :: _ as domains), _) ->
+            let* s = Reg.sort_of r sg (AtDomain (d.ind_name, c, k)) gamma (pis domains Unit) in
+            Ok (max (E.sort_level s) l)
+        | _ -> Ok l
+      in
+      fields_level r sg d c (field_type d.ind_name (nparams d) k fd :: gamma) (k + 1) rest l
+
+let history_level r sg d j =
+  match d.ind_sort with
+  | Prp -> fold_ok (fun l c -> fields_level r sg d c.ctor_name (List.rev d.ind_params) 0 c.ctor_fields l) j d.ind_ctors
+  | s -> Ok (max (E.sort_level s) j)
+
 (* The three δ-constants of (D, j) with [Unit_ℓ], [elim_D[ℓ+1]] and
    [elim_D[ℓ]], unless [recBelow_D] is registered already. *)
 let ensure_below r sg name j =
@@ -167,12 +198,12 @@ let ensure_below r sg name j =
   | Some _ -> Ok sg
   | None ->
       let* d = match find_ind sg name with Some d -> Ok d | None -> Reg.refuse (RUndeclared name) in
-      let l = history_level d j in
+      let* l = history_level r sg d j in
       let* sg = E.ensure_unit r sg l in
-      let* sg = E.ensure_elim r sg name (l + 1) in
-      let* sg = E.ensure_elim r sg name l in
-      let* sg = Reg.define r sg (below_name name j) (below_type d j) (below_body d j) in
-      let* sg = Reg.define r sg (build_name name j) (build_type d j) (build_body d j) in
+      let* sg = E.ensure_elim r sg name (Univ (l + 1)) in
+      let* sg = E.ensure_elim r sg name (Univ l) in
+      let* sg = Reg.define r sg (below_name name j) (below_type d j l) (below_body d l) in
+      let* sg = Reg.define r sg (build_name name j) (build_type d j) (build_body d j l) in
       Reg.define r sg (recbelow_name name j) (recbelow_type d j) (recbelow_body d j)
 
 (* ** Case trees *)
@@ -357,7 +388,7 @@ let prim_ctors = function
   | PBool -> [ ("true", BTrue); ("false", BFalse) ]
 
 let prim_desc pr =
-  { ind_name = prim_name pr; ind_params = []; ind_indices = []; ind_level = 0;
+  { ind_name = prim_name pr; ind_params = []; ind_indices = []; ind_sort = Univ 0; ind_elim = AllSorts;
     ind_ctors = List.map (fun (c, _) -> { ctor_name = c; ctor_fields = []; ctor_indices = [] }) (prim_ctors pr) }
 
 (* The value of the constructor [c] of [pr]: a split asks only for the
@@ -422,7 +453,7 @@ let field_binders ~name ~np ~params ~scope ~gn ~path ~nrec ~hyp_tag xs fields =
         let sb = field_sub ~np ~params rbs (b + 1) in
         let h = pis (subst_tele sb domains)
             (motive_at ~scope gn ~binders:(b + 1 + m)
-               (List.map (subst (upn_sub m sb)) indices @ [ apps (Var m) (vars 0 m) ])) in
+               (List.map (subst (upn m sb)) indices @ [ apps (Var m) (vars 0 m) ])) in
         let p = Option.map (fun p -> p @ [ (k, nrec) ]) path in
         { b_tag = hyp_tag k; b_type = h } :: { b_tag = User (x, p); b_type = a } :: bs
   in
@@ -643,6 +674,12 @@ let rec calls_in rc g env d t =
   | Pair (a, b) -> let* a' = sub d a in let* b' = sub d b in Ok (Done (Pair (a', b')))
   | Fst u -> let* u' = sub d u in Ok (Done (Fst u'))
   | Snd u -> let* u' = sub d u in Ok (Done (Snd u'))
+  | Case (name, s, m, x, bs) ->
+      let* m' = sub d m in
+      let* x' = sub d x in
+      let* bs' = map_ok (sub d) bs in
+      Ok (Done (Case (name, s, m', x', bs')))
+  | Fix (a, k, b) -> let* a' = sub d a in let* b' = sub (d + 1) b in Ok (Done (Fix (a', k, b')))
   | Srt _ | Var _ | Void | Unit | Tt | Bool | BTrue | BFalse | Const _ -> Ok (Done t)
 
 let calls rc g env t = let* r = calls_in rc g env 0 t in done_ rc r
@@ -683,7 +720,7 @@ let rec translate r sg rc = function
       let name = sv.sv_desc.ind_name in
       let seeds = List.map (var_at n) gn.gn_seeds and tail = List.map (var_at n) gn.gn_tail in
       (match sv.sv_prim with
-       | None -> Ok (apps (Const (Elim (name, k))) (sv.sv_params @ [ motive gn ] @ ms @ seeds @ tail), (name, k) :: needed)
+       | None -> Ok (apps (Const (Elim (name, Univ k))) (sv.sv_params @ [ motive gn ] @ ms @ seeds @ tail), (name, k) :: needed)
        | Some pr ->
            let c = Ann (motive gn, Pi (prim_type pr, Srt (Univ k))) in
            Ok (apps (prim_elim pr c ms (var_at n sv.sv_level)) tail, needed))
@@ -762,7 +799,7 @@ let compile_with r out sg fn =
     | History -> compile_history r sg fn rc si g0 env0
   in
   let* () = if splits_struct e then Ok () else Reg.refuse (RCase (CUnsplit x)) in
-  let* sg2 = fold_ok (fun sg (d, k) -> E.ensure_elim r sg d k) sg1 needed in
+  let* sg2 = fold_ok (fun sg (d, k) -> E.ensure_elim r sg d (Univ k)) sg1 needed in
   Ok (sg2, pis (List.map (fun b -> b.b_type) (List.rev g0)) goal0, lams n root, out e)
 
 let compile_term r sg fn = compile_with r (equations fn.fn_name) sg fn

@@ -51,7 +51,7 @@ Import (notations) String.StringSyntax.
 Local Open Scope string_scope.
 Local Open Scope list_scope.
 From DepTypes.Common Require Import Result.
-From DepTypes.PTS Require Import Syntax Named Signature.
+From DepTypes.PTS Require Import Syntax Named Telescope Signature.
 From IndTypes Require Import Telescope MethodLayout.
 From IndTypes.Elim Require Import Decl.
 From IndTypes Require Import Diagnostics.
@@ -318,7 +318,7 @@ Definition prim_ctors (pr : prim) : list (string * term) :=
   end.
 
 Definition prim_desc (pr : prim) : ind_desc :=
-  {| ind_name := prim_name pr; ind_params := []; ind_indices := []; ind_level := 0;
+  {| ind_name := prim_name pr; ind_params := []; ind_indices := []; ind_sort := Univ 0; ind_elim := AllSorts;
      ind_ctors := map (fun '(c, _) => {| ctor_name := c; ctor_fields := []; ctor_indices := [] |})
                     (prim_ctors pr) |}.
 
@@ -400,7 +400,7 @@ Section Fields.
         let m := length Bs in
         let sb := field_sub rbs (S b) in
         let H := pis (subst_tele sb Bs)
-                   (motive_at N gn (S b + m) (map (subst (upn_sub m sb)) vs ++ [apps (Var m) (vars 0 m)])) in
+                   (motive_at N gn (S b + m) (map (subst (upn m sb)) vs ++ [apps (Var m) (vars 0 m)])) in
         let p := option_map (fun p => p ++ [(k, nrec)]) sub in
         mk_binder (hyp_tag k) H :: mk_binder (User x p) A :: B
     end.

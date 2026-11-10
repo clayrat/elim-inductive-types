@@ -23,9 +23,8 @@ From Stdlib Require Import String List Program.Basics.
 Local Open Scope program_scope.
 Import ListNotations.
 From DepTypes.Common Require Import Result.
-From DepTypes.PTS Require Import Syntax Named Signature Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants.
 From IndTypes.Elim Require Import Decl Generate Declare.
 
@@ -33,7 +32,7 @@ Open Scope string_scope.
 Open Scope nterm_scope.
 
 Definition raw_nat : raw_decl := {|
-  rd_name := "Nat"; rd_params := []; rd_indices := []; rd_level := 0;
+  rd_name := "Nat"; rd_params := []; rd_indices := []; rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "zero" (build [] Nat); mk_raw_ctor "succ" (build [] (Nat ~> Nat))] |}.
 
 Example nat_classified : classify_decl raw_nat = Ok nat_desc.
@@ -42,8 +41,8 @@ Proof. vm_compute. reflexivity. Qed.
 (** ** The eliminator *)
 
 Example nat_elim_generated :
-  elim_type nat_desc 0 = build [] elim_nat_ty /\
-  elim_type nat_desc 1 =
+  elim_type nat_desc (Univ 0) = build [] elim_nat_ty /\
+  elim_type nat_desc (Univ 1) =
     build [] (Π "P" : (Nat ~> Type@ 1), "P" zero ~> (Π "n" : Nat, "P" "n" ~> "P" (succ "n")) ~>
               Π "n" : Nat, "P" "n").
 Proof. split; vm_compute; reflexivity. Qed.
@@ -55,12 +54,12 @@ Definition reg_fuel : nat := 300.
 (** Registered with its instance at level 0, ℕ is the signature written
     by hand in the kernel; [double] defined on it is the kernel's too. *)
 Example nat_registered :
-  option_map sig_entries (registered (declare_checked predicative reg_fuel ∅ raw_nat [0]))
+  option_map sig_entries (registered (declare_checked predicative reg_fuel ∅ raw_nat [Univ 0]))
   = Some (base_entries true).
 Proof. vm_compute. reflexivity. Qed.
 
 Definition sg_nat0 : signature :=
-  match registered (declare_checked predicative reg_fuel ∅ raw_nat [0]) with Some sg => sg | None => ∅ end.
+  match registered (declare_checked predicative reg_fuel ∅ raw_nat [Univ 0]) with Some sg => sg | None => ∅ end.
 
 Example double_defined :
   option_map sig_entries
@@ -79,6 +78,6 @@ Proof. vm_compute. reflexivity. Qed.
 (** Instances at several levels, each its own constant. *)
 Example nat_levels :
   option_map (map (fun e => match e with EElim D j _ act => Some (D, j, act) | _ => None end) ∘ sig_entries)
-    (registered (declare_checked predicative reg_fuel ∅ raw_nat [0; 1; 2]))
-  = Some [Some ("Nat", 2, true); Some ("Nat", 1, true); Some ("Nat", 0, true); None].
+    (registered (declare_checked predicative reg_fuel ∅ raw_nat [Univ 0; Univ 1; Univ 2]))
+  = Some [Some ("Nat", Univ 2, true); Some ("Nat", Univ 1, true); Some ("Nat", Univ 0, true); None].
 Proof. vm_compute. reflexivity. Qed.

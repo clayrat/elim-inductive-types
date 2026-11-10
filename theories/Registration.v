@@ -87,6 +87,10 @@ Definition registered (r : list (stage * list event) * registration) : option si
 Definition refusal (r : list (stage * list event) * registration) : option reg_error :=
   match snd r with Refused e => Some e | _ => None end.
 
+(** The signature registered, or the empty one. *)
+Definition sg_of (r : list (stage * list event) * registration) : signature :=
+  match registered r with Some sg => sg | None => ∅ end.
+
 (** ** What the checks guarantee
 
     A check that passes carries the judgment of the annotated kernel

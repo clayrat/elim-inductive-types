@@ -16,9 +16,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From IndTypes.Elim Require Import Decl Generate.
 
 Open Scope string_scope.
@@ -27,7 +26,7 @@ Open Scope nterm_scope.
 Definition empty_ctor (c : string) : ctor_desc := {| ctor_name := c; ctor_fields := []; ctor_indices := [] |}.
 
 Definition simple (D : string) (cs : list string) : raw_decl := {|
-  rd_name := D; rd_params := []; rd_indices := []; rd_level := 0;
+  rd_name := D; rd_params := []; rd_indices := []; rd_sort := Univ 0;
   rd_ctors := map (fun c => mk_raw_ctor c (Const (Ind D))) cs |}.
 
 Definition raw_void : raw_decl := simple "Void" [].
@@ -35,7 +34,7 @@ Definition raw_unit : raw_decl := simple "Unit" ["tt"].
 Definition raw_bool : raw_decl := simple "Bool" ["true"; "false"].
 
 Definition simple_desc (D : string) (cs : list string) : ind_desc := {|
-  ind_name := D; ind_params := []; ind_indices := []; ind_level := 0; ind_ctors := map empty_ctor cs |}.
+  ind_name := D; ind_params := []; ind_indices := []; ind_sort := Univ 0; ind_elim := AllSorts; ind_ctors := map empty_ctor cs |}.
 
 Example primitives_classified :
   classify_decl raw_void = Ok (simple_desc "Void" []) /\
@@ -86,6 +85,8 @@ Fixpoint to_prim (t : term) : term :=
   | Pair a b => Pair (to_prim a) (to_prim b)
   | Fst u => Fst (to_prim u)
   | Snd u => Snd (to_prim u)
+  | Case D s P x bs => Case D s (to_prim P) (to_prim x) (map to_prim bs)
+  | Fix A k b => Fix (to_prim A) k (to_prim b)
   | Srt _ | Var _ | Void | Unit | Tt | Bool | BTrue | BFalse => t
   end.
 
@@ -97,10 +98,10 @@ Definition bool_schema (j : nat) : nterm :=
   Π "C" : (NBool ~> Type@ j), "C" NTrue ~> "C" NFalse ~> Π "b" : NBool, "C" "b".
 
 Example elim_types_are_the_schemas :
-  to_prim (elim_type void_desc 0) = build [] (void_schema 0) /\
-  to_prim (elim_type unit_desc 0) = build [] (unit_schema 0) /\
-  to_prim (elim_type bool_desc 0) = build [] (bool_schema 0) /\
-  to_prim (elim_type bool_desc 1) = build [] (bool_schema 1).
+  to_prim (elim_type void_desc (Univ 0)) = build [] (void_schema 0) /\
+  to_prim (elim_type unit_desc (Univ 0)) = build [] (unit_schema 0) /\
+  to_prim (elim_type bool_desc (Univ 0)) = build [] (bool_schema 0) /\
+  to_prim (elim_type bool_desc (Univ 1)) = build [] (bool_schema 1).
 Proof. repeat split; vm_compute; reflexivity. Qed.
 
 Definition accepted (a : answer unit) : bool := match a with Accepted _ => true | _ => false end.
@@ -108,12 +109,12 @@ Definition accepted (a : answer unit) : bool := match a with Accepted _ => true 
 (** The primitive eliminators inhabit the generated types. *)
 Example primitives_inhabit :
   accepted (snd (run_check predicative ∅ 100 [] (Lam (Lam (ElimVoid (Var 1) (Var 0))))
-                   (to_prim (elim_type void_desc 0)))) &&
+                   (to_prim (elim_type void_desc (Univ 0))))) &&
   accepted (snd (run_check predicative ∅ 100 [] (Lam (Lam (Lam (ElimUnit (Var 2) (Var 1) (Var 0)))))
-                   (to_prim (elim_type unit_desc 0)))) &&
+                   (to_prim (elim_type unit_desc (Univ 0))))) &&
   accepted (snd (run_check predicative ∅ 100 []
                    (Lam (Lam (Lam (Lam (ElimBool (Var 3) (Var 2) (Var 1) (Var 0))))))
-                   (to_prim (elim_type bool_desc 0)))) = true.
+                   (to_prim (elim_type bool_desc (Univ 0))))) = true.
 Proof. vm_compute. reflexivity. Qed.
 
 (** Every generated rule is the primitive contraction; Void has none. *)
@@ -124,7 +125,7 @@ Definition prim_rule (r : iota_rule) : bool :=
   end.
 
 Example rules_are_the_primitive_ones :
-  iota_rules void_desc 0 = [] /\
-  forallb prim_rule (iota_rules unit_desc 0 ++ iota_rules bool_desc 0) = true /\
-  length (iota_rules bool_desc 0) = 2.
+  iota_rules void_desc (Univ 0) = [] /\
+  forallb prim_rule (iota_rules unit_desc (Univ 0) ++ iota_rules bool_desc (Univ 0)) = true /\
+  length (iota_rules bool_desc (Univ 0)) = 2.
 Proof. repeat split; vm_compute; reflexivity. Qed.

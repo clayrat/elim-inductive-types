@@ -16,12 +16,14 @@ on complete answers and logs. They run on the kernel's native reference,
   positive), duplicate constructors, and the bypass mode of the negative
   demonstration;
 - the motive, the methods with the hypothesis right after each recursive
-  field, the eliminator type of `elim_D[j]`, and the ι-rules as data, their
-  right sides built by the native kernel's own `method_args`;
+  field, the eliminator type of `elim_D[s]` for a sort `s` of the motive,
+  and the ι-rules as data, their right sides built by the native kernel's
+  own `method_args`;
 - registration: a declaration with the types of D and its constructors and
-  the levels of the fields, each instance in the four stages of the plan
-  with its rules checked where it has no active rules, `Unit_ℓ`, and the
-  bypass mode.
+  the sorts of the fields, which give its category of elimination, each
+  instance once the category allows its sort, in the four stages of the
+  plan with its rules checked where it has no active rules, `Unit_ℓ`, and
+  the two bypass modes, of positivity and of the sorts of elimination.
 
 `registration_native.ml` is the registration monad of `theories/Registration.v`,
 below both algorithms: every checker run goes to the log with its stage, as
@@ -33,7 +35,9 @@ with the answer.  Both algorithms register their δ-constants with its
 `Recursion/Below.v`, `Recursion/CaseTree.v` and `Recursion/Compile.v`:
 
 - the history: `Below_D`, `build_D` and `recBelow_D` of a description for
-  motives in `Type_j` at the level ℓ = max i j, with the binders of a
+  motives in `Type_j` at the level ℓ, `max i j` for `D : Type_i` and,
+  for a proposition, the largest of j and the inferred levels of the
+  domains of its recursive fields, with the binders of a
   method as the generator lays them out, tuples nested to the right with
   `Unit_ℓ` when empty, and their registration with `Unit_ℓ` and the two
   instances they need;
@@ -54,8 +58,9 @@ algorithms are in `diagnostics_native.ml`, as in `theories/Diagnostics.v`;
 `registration_native` re-exports them and `elim_native` both, by
 `include`, as the Rocq modules export them. The telescopes of
 `theories/Telescope.v` are in `telescope_native.ml`, which depends only on
-the kernel's syntax, with the `rename`, `up_ren` and `up_sub` that the
-native kernel does not export. The layout of the binders of a method,
+the kernel's syntax, with the `rename`, `up_ren` and `up_sub` of
+`PTS/Syntax.v` and the `upn` and `subst_tele` of `PTS/Telescope.v` that
+the native kernel does not export. The layout of the binders of a method,
 from `theories/MethodLayout.v`, is in `method_layout_native.ml`: one pass
 of `fold_slots` with an accumulator, in which both algorithms build their
 methods and binders directly. What both share besides — the combinators
@@ -86,12 +91,16 @@ and a family `Two` with two indices.
 
 - the declarations of `data.ml` with the extracted ones, where those exist;
 - the answers of classification in both modes, and for every description
-  its motives, methods, eliminator types and ι-rules at levels 0, 1 and 2;
+  its motives, methods, eliminator types and ι-rules into Prop and at
+  levels 0, 1 and 2;
 - registrations as scripts of steps (declarations, instances, `ensure_elim`,
   δ-constants, `Unit_ℓ`) run by both sides from the same signature: the
   complete log, every stage with its checker events, and the answer. The
   scripts cover the families and their refusals, the diagonal in the
-  bypass mode and what checks in its signature, every diagnostic, the five
+  bypass mode and what checks in its signature, every diagnostic, the
+  propositions of `Data/Logic.v` with their categories, the refused large
+  eliminations and the proof observed in the mode `BypassElim`, `within`
+  and `elim_class_of` on every combination of sorts, the six
   specifications of the kernel, and fuel from 0 up, with a vector indexed
   by a β-redex and constants whose types are redexes so that every
   `NoFuelAt` and `RNotAType` path is reached;
@@ -106,11 +115,13 @@ and a family `Two` with two indices.
 `test_support.ml`:
 
 - the programs of `programs.ml` with the extracted ones;
-- for every description of `data.ml`, `Unit_1` and a family of level 1,
-  at levels 0, 1 and 2: the level of the history, its names, and the
-  types and bodies of `Below`, `build` and `recBelow`; their
-  registration from several signatures, again and at several levels, an
-  undeclared family, the five specifications and fuel from 0 up;
+- for every description of `data.ml`, `Unit_1`, a family of level 1,
+  `BigP` and `AccP`, at motive and history levels 0, 1 and 2: the names
+  of the history and the types and bodies of `Below`, `build` and
+  `recBelow`; the level of the history with its log, for the families
+  and for propositions; their registration from several signatures,
+  again and at several levels, an undeclared family, a proposition
+  eliminated into Prop only, the five specifications and fuel from 0 up;
 - `start` and the elaboration of every tree of `programs.ml`, the whole
   elaborated tree with its scopes, goals, values of the arguments,
   splits and generalizations, with the tail and the tags of the root

@@ -60,9 +60,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Choose Families.
 From IndTypes.Elim Require Import Decl Generate Declare.
 
@@ -71,18 +70,18 @@ Open Scope nterm_scope.
 
 Definition raw_w : raw_decl := {|
   rd_name := "W"; rd_params := [Srt (Univ 0); build ["A"] ("A" ~> Type@ 0)]; rd_indices := [];
-  rd_level := 0;
+  rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "sup" (build ["B"; "A"] (Π "a" : "A", ("B" "a" ~> W "A" "B") ~> W "A" "B"))] |}.
 
 Example w_classified : classify_decl raw_w = Ok w_desc.
 Proof. vm_compute. reflexivity. Qed.
 
-Example w_elim_generated : elim_type w_desc 0 = build [] elim_w_ty.
+Example w_elim_generated : elim_type w_desc (Univ 0) = build [] elim_w_ty.
 Proof. vm_compute. reflexivity. Qed.
 
 Example w_registered :
-  option_map sig_entries (registered (declare_checked predicative 300 ∅ raw_w [0]))
-  = Some [EElim "W" 0 (build [] elim_w_ty) true; EInd w_desc].
+  option_map sig_entries (registered (declare_checked predicative 300 ∅ raw_w [Univ 0]))
+  = Some [EElim "W" (Univ 0) (build [] elim_w_ty) true; EInd w_desc].
 Proof. vm_compute. reflexivity. Qed.
 
 (** ** ℕ_W *)
@@ -107,7 +106,7 @@ Definition succ_w_body : nterm := λ "n", sup NBool IsTrue NTrue (λ "_", "n").
 
 Definition nat_w_run : list (stage * list event) * registration :=
   run_registration (
-    let! s1 := declare predicative w_fuel ∅ raw_w [0] in
+    let! s1 := declare predicative w_fuel ∅ raw_w [Univ 0] in
     let! s2 := define predicative w_fuel s1 "IsTrue" (build [] (NBool ~> Type@ 0)) (build [] is_true_body) in
     let! s3 := define predicative w_fuel s2 "Nat_W" (build [] (Type@ 0)) (build [] (W NBool IsTrue)) in
     let! s4 := define predicative w_fuel s3 "zero_W" (build [] Nat_W) (build [] zero_w_body) in
@@ -120,7 +119,7 @@ Definition sg_nat_w : signature := match registered nat_w_run with Some sg => sg
 Example nat_w_stages :
   map fst (fst nat_w_run) =
   [AtIndType "W"; AtCtorType "W" "sup"; AtField "W" "sup" 0; AtField "W" "sup" 1;
-   AtElimType "W" 0; AtRuleLhs "W" 0 "sup"; AtRuleRhs "W" 0 "sup";
+   AtElimType "W" (Univ 0); AtRuleLhs "W" (Univ 0) "sup"; AtRuleRhs "W" (Univ 0) "sup";
    AtDefType "IsTrue"; AtDefBody "IsTrue"; AtDefType "Nat_W"; AtDefBody "Nat_W";
    AtDefType "zero_W"; AtDefBody "zero_W"; AtDefType "succ_W"; AtDefBody "succ_W"].
 Proof. vm_compute. reflexivity. Qed.

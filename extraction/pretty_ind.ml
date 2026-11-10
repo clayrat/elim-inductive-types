@@ -43,7 +43,7 @@ let pp_field_kind = function
   | FRec ([], _) -> "recursive"
   | FRec (bs, _) -> "recursive with " ^ plural (List.length bs) "position"
 
-(* [D : Π(Δ). Πθ̄. Type_i], then each constructor at its type rebuilt from
+(* [D : Π(Δ). Πθ̄. s], then each constructor at its type rebuilt from
    the description, with the kinds of its fields. *)
 let pp_desc ?(depth = max_int) d =
   let ctor c =
@@ -53,11 +53,14 @@ let pp_desc ?(depth = max_int) d =
     c.ctor_name ^ " : " ^ pp_binders ~depth (params_given d) (ctor_type d c) ^ kinds in
   (d.ind_name ^ " : " ^ pp_term ~depth (ind_type d)) :: List.map ctor d.ind_ctors
 
-let elim_name d j = pp_gref (Elim (d.ind_name, j))
+let elim_name d s = pp_gref (Elim (d.ind_name, s))
 
-(* The type of [elim_D[j]], its motive named P. *)
-let pp_elim_type ?(depth = max_int) d j =
-  pp_binders ~depth (params_given d @ [ Some "P" ]) (elim_type d j)
+(* The type of [elim_D[s]], its motive named P. *)
+let pp_elim_type ?(depth = max_int) d s =
+  pp_binders ~depth (params_given d @ [ Some "P" ]) (elim_type d s)
+
+(* The sorts the motives of D may live in. *)
+let pp_elim_class = function AllSorts -> "every sort" | PropOnly -> "Prop only"
 
 (* The method of [c], in the context of the parameters and P. *)
 let pp_method ?(depth = max_int) d c =
@@ -101,8 +104,9 @@ let pp_decl_error ?(depth = max_int) e =
 let pp_stage = function
   | AtIndType d -> "the type of " ^ d
   | AtCtorType (_, c) -> "the type of " ^ c
-  | AtField (_, c, i) -> "the level of field " ^ string_of_int i ^ " of " ^ c
-  | AtElimType (d, j) -> "the type of " ^ pp_gref (Elim (d, j))
+  | AtField (_, c, i) -> "the sort of field " ^ string_of_int i ^ " of " ^ c
+  | AtDomain (_, c, i) -> "the level of the domains of field " ^ string_of_int i ^ " of " ^ c
+  | AtElimType (d, s) -> "the type of " ^ pp_gref (Elim (d, s))
   | AtRuleLhs (_, _, c) -> "the ι-rule of " ^ c ^ ", left side"
   | AtRuleRhs (_, _, c) -> "the ι-rule of " ^ c ^ ", right side"
   | AtDefType f -> "the type of " ^ f
@@ -138,9 +142,11 @@ let pp_reg_error ?(depth = max_int) = function
   | RClassify e -> "not in the grammar: " ^ pp_decl_error ~depth e
   | RTaken g -> pp_gref g ^ " is in the signature already"
   | RUndeclared d -> d ^ " is not declared"
-  | RLevel (c, i, s, l) ->
-      "field " ^ string_of_int i ^ " of " ^ c ^ " lives in " ^ pp_sort s ^ ", above "
-      ^ pp_sort (Univ l)
+  | RLevel (c, i, s, sd) ->
+      "field " ^ string_of_int i ^ " of " ^ c ^ " lives in " ^ pp_sort s ^ ", above " ^ pp_sort sd
+  | RElimSort (d, s) ->
+      pp_gref (Elim (d, s)) ^ ": the category of elimination of " ^ d ^ " does not allow motives in "
+      ^ pp_sort s
   | RNotAType (st, t) -> pp_stage st ^ ": its type unfolds to " ^ pp_term ~depth t ^ ", not a sort"
   | RRejected (st, e) -> pp_stage st ^ ": " ^ pp_error ~depth e
   | ROpen -> "an entry with a free variable"
@@ -151,7 +157,7 @@ let pp_reg_error ?(depth = max_int) = function
 
 let pp_entry = function
   | EInd d -> d.ind_name
-  | EElim (d, j, _, active) -> pp_gref (Elim (d, j)) ^ if active then "" else " (rules not active)"
+  | EElim (d, s, _, active) -> pp_gref (Elim (d, s)) ^ if active then "" else " (rules not active)"
   | EDef (f, _, _) -> f
 
 let pp_registration ?(depth = max_int) = function

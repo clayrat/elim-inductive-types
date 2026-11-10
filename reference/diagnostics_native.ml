@@ -25,9 +25,10 @@ type stage =
   | AtIndType of string
   | AtCtorType of string * string
   | AtField of string * string * int
-  | AtElimType of string * int
-  | AtRuleLhs of string * int * string
-  | AtRuleRhs of string * int * string
+  | AtDomain of string * string * int     (* D, the constructor, the recursive field: its domains *)
+  | AtElimType of string * sort           (* D, the sort of the motive *)
+  | AtRuleLhs of string * sort * string
+  | AtRuleRhs of string * sort * string
   | AtDefType of string
   | AtDefBody of string
   | AtMotive of string * string           (* f, the variable split: the sort of the motive *)
@@ -57,7 +58,8 @@ type reg_error =
   | RClassify of decl_error
   | RTaken of gref
   | RUndeclared of string
-  | RLevel of string * int * sort * int    (* constructor, field, its sort, the level of D *)
+  | RLevel of string * int * sort * sort   (* constructor, field, its sort, the sort of D *)
+  | RElimSort of string * sort             (* D, a sort of motive its category does not allow *)
   | RNotAType of stage * term
   | RRejected of stage * error
   | ROpen

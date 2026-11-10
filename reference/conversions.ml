@@ -8,7 +8,7 @@ module X = Deptypes
 module N = Pts_native
 module En = Elim_native
 module R = Recursion_native
-module L = Looping
+module L = Named
 
 open Extracted
 
@@ -19,11 +19,13 @@ let raw_to_extracted raw = {
   X.rd_name = raw.En.rd_name;
   rd_params = List.map term_to_extracted raw.En.rd_params;
   rd_indices = List.map term_to_extracted raw.En.rd_indices;
-  rd_level = raw.En.rd_level;
+  rd_sort = sort_to_extracted raw.En.rd_sort;
   rd_ctors = List.map (fun c -> { X.rc_name = c.En.rc_name; rc_type = term_to_extracted c.En.rc_type })
                raw.En.rd_ctors }
 
 let positivity_to_extracted = function En.Checked -> X.Checked | En.Bypass -> X.Bypass
+
+let elim_mode_to_extracted = function En.CheckElim -> X.CheckElim | En.BypassElim -> X.BypassElim
 
 let site_to_extracted = function En.SField l -> X.SField l | En.SResult -> X.SResult
 
@@ -56,9 +58,10 @@ let stage_to_extracted = function
   | En.AtIndType d -> X.AtIndType d
   | En.AtCtorType (d, c) -> X.AtCtorType (d, c)
   | En.AtField (d, c, l) -> X.AtField (d, c, l)
-  | En.AtElimType (d, j) -> X.AtElimType (d, j)
-  | En.AtRuleLhs (d, j, c) -> X.AtRuleLhs (d, j, c)
-  | En.AtRuleRhs (d, j, c) -> X.AtRuleRhs (d, j, c)
+  | En.AtDomain (d, c, l) -> X.AtDomain (d, c, l)
+  | En.AtElimType (d, s) -> X.AtElimType (d, sort_to_extracted s)
+  | En.AtRuleLhs (d, s, c) -> X.AtRuleLhs (d, sort_to_extracted s, c)
+  | En.AtRuleRhs (d, s, c) -> X.AtRuleRhs (d, sort_to_extracted s, c)
   | En.AtDefType f -> X.AtDefType f
   | En.AtDefBody f -> X.AtDefBody f
   | En.AtMotive (f, x) -> X.AtMotive (f, x)
@@ -88,7 +91,8 @@ let reg_error_to_extracted = function
   | En.RClassify e -> X.RClassify (decl_error_to_extracted e)
   | En.RTaken g -> X.RTaken (gref_to_extracted g)
   | En.RUndeclared d -> X.RUndeclared d
-  | En.RLevel (c, l, s, i) -> X.RLevel (c, l, sort_to_extracted s, i)
+  | En.RLevel (c, l, s, sd) -> X.RLevel (c, l, sort_to_extracted s, sort_to_extracted sd)
+  | En.RElimSort (d, s) -> X.RElimSort (d, sort_to_extracted s)
   | En.RNotAType (st, t) -> X.RNotAType (stage_to_extracted st, term_to_extracted t)
   | En.RRejected (st, e) -> X.RRejected (stage_to_extracted st, error_to_extracted e)
   | En.ROpen -> X.ROpen
@@ -134,6 +138,10 @@ let rec named_to_extracted = function
   | L.Pairing (a, b) -> X.NPair (named_to_extracted a, named_to_extracted b)
   | L.First t -> X.NFst (named_to_extracted t)
   | L.Second t -> X.NSnd (named_to_extracted t)
+  | L.Match (d, s, m, x, bs) ->
+      X.NCase (d, sort_to_extracted s, named_to_extracted m, named_to_extracted x,
+               List.map named_to_extracted bs)
+  | L.Fixpoint (f, a, k, b) -> X.NFix (f, named_to_extracted a, k, named_to_extracted b)
 
 let mark_to_extracted = function R.Constant -> X.Constant | R.Varying -> X.Varying
 let strategy_to_extracted = function R.Direct -> X.Direct | R.History -> X.History

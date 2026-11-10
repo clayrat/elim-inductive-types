@@ -20,9 +20,14 @@ type raw_decl = {
   rd_name : string;
   rd_params : term list;
   rd_indices : term list;
-  rd_level : int;
+  rd_sort : sort;          (** [Type_i] or [Prop] *)
   rd_ctors : raw_ctor list;
 }
+
+(** The category of elimination by the sort of D alone, which
+    registration refines; the level of a sort, Prop counting as 0. *)
+val sort_class : sort -> elim_class
+val sort_level : sort -> int
 
 (** Whether classification checks strict positivity, or bypasses it:
     [Bypass] is the demonstration mode, where a field outside the grammar
@@ -35,12 +40,12 @@ val classify_decl : raw_decl -> (ind_desc, decl_error) result
 
 (** {1 Generation} *)
 
-val motive_type : ind_desc -> int -> term
+val motive_type : ind_desc -> sort -> term
 
 (** In the context of the parameters and P. *)
 val method_type : ind_desc -> ctor_desc -> term
 
-val elim_type : ind_desc -> int -> term
+val elim_type : ind_desc -> sort -> term
 
 type iota_rule = {
   rule_ctor : string;
@@ -50,16 +55,28 @@ type iota_rule = {
   rule_type : term;
 }
 
-val iota_rules : ind_desc -> int -> iota_rule list
+val iota_rules : ind_desc -> sort -> iota_rule list
 
 (** {1 Registration} *)
 
-val declare_with : registrar -> positivity -> signature -> raw_decl -> int list -> (signature, failure) result
+(** A field of the sort in a declaration of the sort; the category of a
+    declaration from the sorts of the fields of its constructors. *)
+val within : sort -> sort -> bool
+val elim_class_of : sort -> sort list list -> elim_class
 
-val declare : registrar -> signature -> raw_decl -> int list -> (signature, failure) result
-val declare_elim : registrar -> signature -> string -> int -> (signature, failure) result
-val ensure_elim : registrar -> signature -> string -> int -> (signature, failure) result
-val check_rule : registrar -> signature -> string -> int -> iota_rule -> (unit, failure) result
+(** Whether the registration of an instance checks the sort of its
+    motive against the category of D: [BypassElim] is the demonstration
+    mode. *)
+type elim_mode = CheckElim | BypassElim
+
+val declare_with :
+  registrar -> positivity -> elim_mode -> signature -> raw_decl -> sort list -> (signature, failure) result
+
+val declare : registrar -> signature -> raw_decl -> sort list -> (signature, failure) result
+val declare_elim_with : registrar -> elim_mode -> signature -> string -> sort -> (signature, failure) result
+val declare_elim : registrar -> signature -> string -> sort -> (signature, failure) result
+val ensure_elim : registrar -> signature -> string -> sort -> (signature, failure) result
+val check_rule : registrar -> signature -> string -> sort -> iota_rule -> (unit, failure) result
 
 val unit_name : int -> string
 val unit_at : int -> term
@@ -68,5 +85,6 @@ val ensure_unit : registrar -> signature -> int -> (signature, failure) result
 
 (** {1 Entry points} *)
 
-val declare_checked : spec -> int -> signature -> raw_decl -> int list -> log * registration
-val declare_bypassing : spec -> int -> signature -> raw_decl -> int list -> log * registration
+val declare_checked : spec -> int -> signature -> raw_decl -> sort list -> log * registration
+val declare_bypassing : spec -> int -> signature -> raw_decl -> sort list -> log * registration
+val declare_bypassing_elim : spec -> int -> signature -> raw_decl -> sort list -> log * registration

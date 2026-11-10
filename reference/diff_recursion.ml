@@ -11,7 +11,7 @@ module X = Deptypes
 module N = Pts_native
 module En = Elim_native
 module R = Recursion_native
-module L = Looping
+module L = Named
 module Co = Constants
 module Fa = Families
 module Da = Data
@@ -25,7 +25,7 @@ open Test_support
 
 let fuel = 1000
 
-let declare raw = Declare (raw, [ 0 ])
+let declare raw = Declare (raw, univ [ 0 ])
 
 (* A compilation of [fns] in turn by both sides from the same signature;
    the two signatures, if both register. *)
@@ -73,6 +73,17 @@ let compare_below ?(spec = predicative) ?(fuel = fuel) label (nsg, xsg) steps =
     X.run_registration
       (List.fold_left (fun m (d, j) -> X.tbind m (fun sg -> X.ensure_below xspec fuel sg d j)) (X.tret xsg) steps) in
   compare_run label native extracted
+
+(* The level of the history of [name] for motives in [Type_j], with its
+   log, by both sides. *)
+let compare_level ?(spec = predicative) label (nsg, xsg) name j =
+  let xspec, nspec = spec in
+  match N.find_ind nsg name, X.sig_ind xsg name with
+  | Some d, Some xd ->
+      let nlog, nresult = En.run_steps nspec fuel (fun r -> R.history_level r nsg d j) in
+      equal label (log_to_extracted nlog, result_to_extracted Fun.id failure_to_extracted nresult)
+        (X.run_traced (X.history_level xspec fuel xsg xd j))
+  | _ -> failwith (label ^ ": " ^ name ^ " is not declared")
 
 (* ** Programs enumerated across the grammar of case trees
 
@@ -206,31 +217,64 @@ let run () =
   let raw_tel =
     { (Da.decl "Tel" [ Da.ctor "tnil" [] (Da.k (N.Ind "Tel"));
                        Da.ctor "tcons" [] (L.arrow Pr.type0 (L.arrow (Da.k (N.Ind "Tel")) (Da.k (N.Ind "Tel")))) ])
-      with En.rd_level = 1 } in
+      with En.rd_sort = N.Univ 1 } in
   let families =
     script "families" (List.map declare [ Da.raw_nat; Da.raw_vec; Da.raw_tree; Da.raw_w; Da.raw_tr ]
                        @ [ Declare (raw_tel, []) ]) in
   let list = script "List" [ declare Da.raw_list ] in
   let two = script "Two" ~sg:families [ declare Pr.raw_two ] in
 
-  (* The history: its terms for every description at every level. *)
+  (* Propositions: [BigP] over [Type₀], [AccP] over a proposition, and
+     [or], eliminated into Prop only. *)
+  let props =
+    registered "propositions"
+      (compare_script "rec/propositions" predicative_prop 300
+         [ Declare (Da.raw_bigp, []); Declare (Da.raw_accp, []); Declare (Da.raw_or, [ N.Prp ]) ]) in
+
+  (* The level of the history, inferred for a proposition. *)
+  List.iter (fun (label, spec, sg, names) ->
+      List.iter (fun name ->
+          List.iter (fun j -> compare_level ~spec (Printf.sprintf "level/%s/%s/%d" label name j) sg name j) levels)
+        names) [
+    "families", predicative, families, [ "Nat"; "Vec"; "Tree"; "W"; "Tr"; "Tel" ];
+    "propositions", predicative_prop, props, [ "BigP"; "AccP"; "or" ];
+  ];
+  (* [BigP] over [Type₀]: level 1 for a motive in [Type₀]; [AccP] over a
+     proposition: the level of the motive. *)
+  let native_level name j =
+    let sg = fst props in
+    match N.find_ind sg name with
+    | Some d -> snd (En.run_steps N.predicative_prop fuel (fun r -> R.history_level r sg d j))
+    | None -> failwith name in
+  expect "level/BigP" (List.map (native_level "BigP") levels) [ Ok 1; Ok 1; Ok 2 ];
+  expect "level/AccP" (List.map (native_level "AccP") levels) [ Ok 0; Ok 1; Ok 2 ];
+
+  (* The history: its terms for every description at every motive level
+     and every history level. *)
   let classified raw = match En.classify_decl raw with Ok d -> d | Error _ -> failwith raw.En.rd_name in
-  let unit_1 = classified { (Da.decl "Unit_1" [ Da.ctor "tt_1" [] (Da.k (N.Ind "Unit_1")) ]) with En.rd_level = 1 } in
+  let unit_1 = classified { (Da.decl "Unit_1" [ Da.ctor "tt_1" [] (Da.k (N.Ind "Unit_1")) ]) with En.rd_sort = N.Univ 1 } in
   let descriptions = List.map (fun raw -> (raw.En.rd_name, classified raw))
       [ Da.raw_nat; Da.raw_list; Da.raw_vec; Da.raw_tree; Da.raw_w; Da.raw_tr; Da.raw_void; Da.raw_unit;
-        Da.raw_bool; raw_tel ] @ [ "Unit_1", unit_1 ] in
+        Da.raw_bool; raw_tel; Da.raw_bigp; Da.raw_accp ] @ [ "Unit_1", unit_1 ] in
+  let parts = [
+    "Below type", R.below_type, X.below_type;
+    "Below body", (fun d _ l -> R.below_body d l), (fun d _ l -> X.below_body d l);
+    "build type", (fun d j _ -> R.build_type d j), (fun d j _ -> X.build_type d j);
+    "build body", R.build_body, X.build_body;
+    "recBelow type", (fun d j _ -> R.recbelow_type d j), (fun d j _ -> X.recbelow_type d j);
+    "recBelow body", (fun d j _ -> R.recbelow_body d j), (fun d j _ -> X.recbelow_body d j);
+  ] in
   List.iter (fun (label, d) ->
       let xd = desc_to_extracted d in
       List.iter (fun j ->
           let at = Printf.sprintf "history/%s/%d" label j in
-          equal (at ^ "/level") (R.history_level d j) (X.history_level xd j);
           equal (at ^ "/names") (R.below_name label j, R.build_name label j, R.recbelow_name label j)
             (X.below_name label j, X.build_name label j, X.recbelow_name label j);
-          List.iter (fun (part, native, extracted) ->
-              equal (at ^ "/" ^ part) (term_to_extracted (native d j)) (extracted xd j))
-            [ "Below type", R.below_type, X.below_type; "Below body", R.below_body, X.below_body;
-              "build type", R.build_type, X.build_type; "build body", R.build_body, X.build_body;
-              "recBelow type", R.recbelow_type, X.recbelow_type; "recBelow body", R.recbelow_body, X.recbelow_body ])
+          List.iter (fun l ->
+              List.iter (fun (part, native, extracted) ->
+                  equal (Printf.sprintf "%s/at %d/%s" at l part) (term_to_extracted (native d j l)) (extracted xd j l))
+                parts)
+            levels)
         levels)
     descriptions;
 
@@ -241,6 +285,14 @@ let run () =
     "List", list, [ ("List", 0); ("List", 2) ];
     "undeclared", nat, [ ("Vec", 0) ];
   ];
+  List.iter (fun (label, steps) -> compare_below ~spec:predicative_prop ("below/" ^ label) props steps) [
+    "BigP", [ ("BigP", 0); ("BigP", 1) ];
+    "AccP", [ ("AccP", 0); ("AccP", 1) ];
+    "or", [ ("or", 0) ];
+  ];
+  List.iter (fun f ->
+      compare_below ~spec:predicative_prop ~fuel:f (Printf.sprintf "below/BigP/fuel %d" f) props [ ("BigP", 0) ])
+    fuels;
   List.iter (fun (spec_name, spec) ->
       compare_below ~spec ("below/Nat/" ^ spec_name) nat [ ("Nat", 0); ("Nat", 1) ]) specs;
   List.iter (fun f ->

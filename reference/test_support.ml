@@ -53,9 +53,10 @@ let show_stage = function
   | En.AtIndType d -> Printf.sprintf "AtIndType %s" d
   | En.AtCtorType (d, c) -> Printf.sprintf "AtCtorType (%s, %s)" d c
   | En.AtField (d, c, l) -> Printf.sprintf "AtField (%s, %s, %d)" d c l
-  | En.AtElimType (d, j) -> Printf.sprintf "AtElimType (%s, %d)" d j
-  | En.AtRuleLhs (d, j, c) -> Printf.sprintf "AtRuleLhs (%s, %d, %s)" d j c
-  | En.AtRuleRhs (d, j, c) -> Printf.sprintf "AtRuleRhs (%s, %d, %s)" d j c
+  | En.AtDomain (d, c, l) -> Printf.sprintf "AtDomain (%s, %s, %d)" d c l
+  | En.AtElimType (d, s) -> Printf.sprintf "AtElimType (%s, %s)" d (N.show_sort s)
+  | En.AtRuleLhs (d, s, c) -> Printf.sprintf "AtRuleLhs (%s, %s, %s)" d (N.show_sort s) c
+  | En.AtRuleRhs (d, s, c) -> Printf.sprintf "AtRuleRhs (%s, %s, %s)" d (N.show_sort s) c
   | En.AtDefType f -> Printf.sprintf "AtDefType %s" f
   | En.AtDefBody f -> Printf.sprintf "AtDefBody %s" f
   | En.AtMotive (f, x) -> Printf.sprintf "AtMotive (%s, %s)" f x
@@ -70,28 +71,35 @@ let compare_run label (nlog, nanswer) (xlog, xanswer) =
   equal (label ^ "/answer") (registration_to_extracted nanswer) xanswer
 
 (* A registration as a script of steps, run by both sides from the same
-   signature. *)
+   signature; each step is an entry point of algorithm 1. *)
 type step =
-  | Declare of En.raw_decl * int list            (* the declaration, the levels *)
-  | DeclareBypassing of En.raw_decl * int list   (* in the demonstration mode *)
-  | DeclareElim of string * int
-  | EnsureElim of string * int
+  | Declare of En.raw_decl * N.sort list          (* the declaration, the sorts of the instances *)
+  | DeclareWith of En.positivity * En.elim_mode * En.raw_decl * N.sort list  (* in the given modes *)
+  | DeclareElim of string * N.sort
+  | EnsureElim of string * N.sort
   | Define of string * N.term * N.term
   | EnsureUnit of int
 
+(* Instances at the levels of Type. *)
+let univ js = List.map (fun j -> N.Univ j) js
+
 let native_step r sg = function
-  | Declare (raw, js) -> En.declare_with r En.Checked sg raw js
-  | DeclareBypassing (raw, js) -> En.declare_with r En.Bypass sg raw js
-  | DeclareElim (d, j) -> En.declare_elim r sg d j
-  | EnsureElim (d, j) -> En.ensure_elim r sg d j
+  | Declare (raw, ss) -> En.declare r sg raw ss
+  | DeclareWith (mode, em, raw, ss) -> En.declare_with r mode em sg raw ss
+  | DeclareElim (d, s) -> En.declare_elim r sg d s
+  | EnsureElim (d, s) -> En.ensure_elim r sg d s
   | Define (f, ty, body) -> En.define r sg f ty body
   | EnsureUnit l -> En.ensure_unit r sg l
 
-let extracted_step spec fuel sg = function
-  | Declare (raw, js) -> X.declare_with spec fuel X.Checked sg (raw_to_extracted raw) js
-  | DeclareBypassing (raw, js) -> X.declare_with spec fuel X.Bypass sg (raw_to_extracted raw) js
-  | DeclareElim (d, j) -> X.declare_elim spec fuel sg d j
-  | EnsureElim (d, j) -> X.ensure_elim spec fuel sg d j
+let extracted_step spec fuel sg =
+  let sorts = List.map sort_to_extracted in
+  function
+  | Declare (raw, ss) -> X.declare spec fuel sg (raw_to_extracted raw) (sorts ss)
+  | DeclareWith (mode, em, raw, ss) ->
+      X.declare_with spec fuel (positivity_to_extracted mode) (elim_mode_to_extracted em) sg
+        (raw_to_extracted raw) (sorts ss)
+  | DeclareElim (d, s) -> X.declare_elim spec fuel sg d (sort_to_extracted s)
+  | EnsureElim (d, s) -> X.ensure_elim spec fuel sg d (sort_to_extracted s)
   | Define (f, ty, body) -> X.define spec fuel sg f (term_to_extracted ty) (term_to_extracted body)
   | EnsureUnit l -> X.ensure_unit spec fuel sg l
 
@@ -131,9 +139,11 @@ let compare_normalize label (nsg, xsg) fuel term =
 (* ** Specifications and budgets *)
 
 let predicative = (X.predicative, N.predicative)
+let predicative_prop = (X.predicative_prop, N.predicative_prop)
 
 let specs = [
   "predicative", predicative;
+  "predicative with Prop", predicative_prop;
   "pure predicative", (X.pure_predicative, N.pure_predicative);
   "U-", (X.system_u_minus, N.system_u_minus);
   "U", (X.system_u, N.system_u);

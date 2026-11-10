@@ -3,10 +3,12 @@
     A telescope is a list of types, outermost first, each in the context
     of those before it, as [pis] of PTS.Syntax takes it.  Both algorithms
     take the domains off a type (Elim.Decl, Recursion.Compile), and
-    rename (Elim.Generate, Recursion.Below) or substitute in
-    (Recursion.CaseTree) a telescope entry by entry, each entry under
-    those before it, and a term under the [m] binders of a telescope.
-    The module depends only on the kernel's syntax. *)
+    rename (Elim.Generate, Recursion.Below) a telescope entry by entry,
+    each entry under those before it, and a term under the [m] binders
+    of a telescope.  Substitution in a telescope and under its binders,
+    [subst_tele] and [upn], is the kernel's PTS.Telescope
+    (Recursion.CaseTree).  The module depends only on the kernel's
+    syntax. *)
 
 From Stdlib Require Import List.
 Import ListNotations.
@@ -40,20 +42,4 @@ Fixpoint rename_tele (r : nat -> nat) (As : list term) : list term :=
   match As with
   | [] => []
   | A :: As' => rename r A :: rename_tele (up_ren r) As'
-  end.
-
-(** ** Substitutions *)
-
-(** Substitution under the [m] binders of a telescope, and in each entry
-    of one. *)
-Fixpoint upn_sub (m : nat) (sb : nat -> term) : nat -> term :=
-  match m with
-  | 0 => sb
-  | S m' => up_sub (upn_sub m' sb)
-  end.
-
-Fixpoint subst_tele (sb : nat -> term) (As : list term) : list term :=
-  match As with
-  | [] => []
-  | A :: As' => subst sb A :: subst_tele (up_sub sb) As'
   end.

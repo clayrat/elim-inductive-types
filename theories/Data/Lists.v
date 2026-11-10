@@ -23,9 +23,8 @@
 From Stdlib Require Import String List.
 Import ListNotations.
 From DepTypes.Common Require Import Result.
-From DepTypes.PTS Require Import Syntax Named Signature Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants Families.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Data Require Import Nat.
@@ -40,12 +39,12 @@ Definition lnil (A : nterm) : nterm := NConst (Ctor "List" "nil") A.
 Definition lcons (A x xs : nterm) : nterm := NConst (Ctor "List" "cons") A x xs.
 
 Definition raw_list : raw_decl := {|
-  rd_name := "List"; rd_params := [Srt (Univ 0)]; rd_indices := []; rd_level := 0;
+  rd_name := "List"; rd_params := [Srt (Univ 0)]; rd_indices := []; rd_sort := Univ 0;
   rd_ctors := [mk_raw_ctor "nil" (build ["A"] (List "A"));
                mk_raw_ctor "cons" (build ["A"] ("A" ~> List "A" ~> List "A"))] |}.
 
 Definition list_desc : ind_desc := {|
-  ind_name := "List"; ind_params := [Srt (Univ 0)]; ind_indices := []; ind_level := 0;
+  ind_name := "List"; ind_params := [Srt (Univ 0)]; ind_indices := []; ind_sort := Univ 0; ind_elim := AllSorts;
   ind_ctors := [
     {| ctor_name := "nil"; ctor_fields := []; ctor_indices := [] |};
     {| ctor_name := "cons"; ctor_fields := [FArg (build ["A"] "A"); FRec [] []]; ctor_indices := [] |} ] |}.
@@ -54,7 +53,7 @@ Example list_classified : classify_decl raw_list = Ok list_desc.
 Proof. vm_compute. reflexivity. Qed.
 
 Example list_elim_generated :
-  elim_type list_desc 0 =
+  elim_type list_desc (Univ 0) =
     build [] (Π "A" : Type@ 0, Π "P" : (List "A" ~> Type@ 0),
               "P" (lnil "A") ~>
               (Π "x" : "A", Π "xs" : List "A", "P" "xs" ~> "P" (lcons "A" "x" "xs")) ~>
@@ -64,7 +63,7 @@ Proof. vm_compute. reflexivity. Qed.
 (** ** Vectors *)
 
 Definition raw_vec : raw_decl := {|
-  rd_name := "Vec"; rd_params := [Srt (Univ 0)]; rd_indices := [build ["A"] Nat]; rd_level := 0;
+  rd_name := "Vec"; rd_params := [Srt (Univ 0)]; rd_indices := [build ["A"] Nat]; rd_sort := Univ 0;
   rd_ctors := [
     mk_raw_ctor "nil" (build ["A"] (Vec "A" zero));
     mk_raw_ctor "cons"
@@ -73,24 +72,24 @@ Definition raw_vec : raw_decl := {|
 Example vec_classified : classify_decl raw_vec = Ok vec_desc.
 Proof. vm_compute. reflexivity. Qed.
 
-Example vec_elim_generated : elim_type vec_desc 0 = build [] elim_vec_ty.
+Example vec_elim_generated : elim_type vec_desc (Univ 0) = build [] elim_vec_ty.
 Proof. vm_compute. reflexivity. Qed.
 
 (** ** Registration *)
 
 Example list_registered :
-  option_map sig_entries (registered (declare_checked predicative reg_fuel ∅ raw_list [0]))
-  = Some [EElim "List" 0 (elim_type list_desc 0) true; EInd list_desc].
+  option_map sig_entries (registered (declare_checked predicative reg_fuel ∅ raw_list [Univ 0]))
+  = Some [EElim "List" (Univ 0) (elim_type list_desc (Univ 0)) true; EInd list_desc].
 Proof. vm_compute. reflexivity. Qed.
 
 (** Over ℕ, vectors are the kernel's hand-written entries. *)
 Example vec_registered :
-  option_map sig_entries (registered (declare_checked predicative reg_fuel sg_nat0 raw_vec [0]))
-  = Some ([EElim "Vec" 0 (build [] elim_vec_ty) true; EInd vec_desc] ++ base_entries true)%list.
+  option_map sig_entries (registered (declare_checked predicative reg_fuel sg_nat0 raw_vec [Univ 0]))
+  = Some ([EElim "Vec" (Univ 0) (build [] elim_vec_ty) true; EInd vec_desc] ++ base_entries true)%list.
 Proof. vm_compute. reflexivity. Qed.
 
 (** Without ℕ in the signature the index type of vectors is no type. *)
 Example vec_needs_nat :
-  refusal (declare_checked predicative reg_fuel ∅ raw_vec [0])
+  refusal (declare_checked predicative reg_fuel ∅ raw_vec [Univ 0])
   = Some (RRejected (AtIndType "Vec") (EUnknownConst (Ind "Nat"))).
 Proof. vm_compute. reflexivity. Qed.

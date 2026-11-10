@@ -2,7 +2,8 @@
    and substitutions of a telescope entry by entry, each entry under those
    before it, and of a term under the binders of one.  It depends only on
    the kernel's syntax; [rename], [up_ren] and [up_sub], which Rocq takes
-   from PTS/Syntax.v, the native kernel does not export. *)
+   from PTS/Syntax.v, and [upn] and [subst_tele], from PTS/Telescope.v,
+   the native kernel does not export. *)
 
 open Pts_native
 
@@ -26,9 +27,10 @@ let rec rename_tele r = function
 
 (* ** Substitutions *)
 
-(* Under the [m] binders of a telescope, and in each entry of one. *)
+(* Under the [m] binders of a telescope, and in each entry of one, as
+   [upn] and [subst_tele] of the kernel's PTS/Telescope.v. *)
 let up_sub sb n = if n = 0 then Var 0 else lift 1 (sb (n - 1))
-let rec upn_sub m sb = if m = 0 then sb else up_sub (upn_sub (m - 1) sb)
+let rec upn m sb = if m = 0 then sb else up_sub (upn (m - 1) sb)
 
 let rec subst_tele sb = function
   | [] -> []

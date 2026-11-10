@@ -18,7 +18,7 @@ TESTS := data.ml programs.ml conversions.ml test_support.ml diff.ml diff_recursi
 # errors point at them, into _build, with every warning an error except
 # fragile matches (4), record patterns without [_] (9), type-directed
 # disambiguation (40-42, 44, 45) and missing interfaces (70).
-EXTERNAL := deptypes.mli deptypes.ml pts_native.mli pts_native.ml looping.ml constants.ml families.ml extracted.ml
+EXTERNAL := deptypes.mli deptypes.ml pts_native.mli pts_native.ml named.ml looping.ml constants.ml families.ml extracted.ml
 WARNINGS := -w +A-4-9-40-41-42-44-45-70 -warn-error +A
 OBJECTS := $(addprefix _build/,$(patsubst %.ml,%.cmo,$(filter %.ml,$(EXTERNAL) $(NATIVE) $(TESTS))))
 

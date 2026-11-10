@@ -10,8 +10,10 @@
     Proved so far: the classification of declarations is faithful (the
     types rebuilt from a description are the declared ones) and strictly
     positive; and whatever a registration returns has passed its checks
-    in the sense of the annotated kernel: declarations, instances of
-    eliminators with their ι-rules, δ-constants, and, for algorithm 2,
+    in the sense of the annotated kernel: declarations, with the sorts of
+    their fields and the category of elimination these give, instances
+    of eliminators into the sorts the category allows, with their
+    ι-rules, δ-constants, and, for algorithm 2,
     the history [Below_D], [build_D], [recBelow_D] and every compiled
     function: a δ-constant checked against its declared type without
     itself, its defining equations holding by conversion.
@@ -33,11 +35,15 @@
     declarative one.
 
     Open for algorithm 1, stated below: the classification is complete
-    for the grammar; for every accepted declaration and every level the
-    generated instance is typed and its ι-rules keep types, declaratively
-    and in the annotated kernel; its registration succeeds with enough
-    fuel; and the signatures that registrations build, compilations
-    included, are type-correct, normalizing and consistent.
+    for the grammar; for every accepted declaration and every sort of the
+    table the generated instance is typed and its ι-rules keep types,
+    declaratively and in the annotated kernel; its registration succeeds
+    with enough fuel when the category allows the sort; and the
+    signatures that registrations build, compilations included, are
+    type-correct, normalizing and consistent.  The obligations are stated
+    for the predicative hierarchy with Prop, [predicative_prop], which
+    contains the one without it: the declarations of lecture 7 are among
+    its declarations.
 
     Open for algorithm 2, stated below: for every declaration and level
     the history is typed, declaratively and in the annotated kernel, and
@@ -54,7 +60,7 @@
     in reference/ is covered only by differential tests. *)
 
 From DepTypes.Common Require Import Result.
-From DepTypes.PTS Require Import Syntax Signature Typing Bidir.
+From DepTypes.PTS Require Import Syntax Spec Signature Typing Bidir.
 From DepTypes.Configs Require Import Predicative.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Recursion Require Import Below CaseTree Compile.
@@ -65,6 +71,9 @@ Import ListNotations.
 
 Local Notation string := String.string.
 
+(** The table of the obligations, the predicative hierarchy with Prop. *)
+Local Notation Sp := predicative_prop.
+
 (** ** Classification (algorithm 1) *)
 
 (** The types of D and of its constructors rebuilt from the classified
@@ -72,7 +81,7 @@ Local Notation string := String.string.
 Definition classification_faithful : Prop :=
   forall mode d desc, classify_decl_with mode d = Ok desc ->
   ind_name desc = rd_name d /\
-  ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (Univ (rd_level d))) /\
+  ind_type desc = pis (rd_params d ++ rd_indices d) (Srt (rd_sort d)) /\
   Forall2 (fun rc cd => ctor_name cd = rc_name rc /\ ctor_type desc cd = pis (rd_params d) (rc_type rc))
     (rd_ctors d) (ind_ctors desc).
 
@@ -91,37 +100,45 @@ Proof. exact classify_decl_strictly_positive. Qed.
 (** ** Registration (algorithm 1) *)
 
 (** A registered declaration was free in the signature, which gains
-    exactly its entry; the types of D and of its constructors are types of
-    the annotated kernel, and every field has a level at most that of D. *)
+    exactly its entry.  In the signature where it was checked, with D at
+    the category of its sort, the types of D and of its constructors are
+    types of the annotated kernel, and every field has a sort allowed in
+    D; the entry registered has the category of these sorts. *)
 Definition declaration_sound : Prop :=
   forall S fuel mode sg raw log log' sg' d,
   declare_ind_with S fuel mode sg raw log = (log', Ok (sg', d)) ->
-  classify_decl_with mode raw = Ok d /\ sig_ind sg (rd_name raw) = None /\
-  sig_entries sg' = EInd d :: sig_entries sg /\
-  (exists s, is_type_of S sg' [] (ind_type d) s) /\
-  Forall (fun c => (exists s, is_type_of S sg' [] (ctor_type d c) s) /\
-                   fields_typed S sg' d (rev (ind_params d)) 0 (ctor_fields c)) (ind_ctors d).
+  exists d0 sg1 fss,
+    classify_decl_with mode raw = Ok d0 /\ sig_ind sg (rd_name raw) = None /\
+    sig_entries sg1 = EInd d0 :: sig_entries sg /\
+    (exists s, is_type_of S sg1 [] (ind_type d0) s) /\
+    Forall2 (fun c ss => (exists s, is_type_of S sg1 [] (ctor_type d0 c) s) /\
+                         fields_typed S sg1 d0 (rev (ind_params d0)) 0 (ctor_fields c) ss)
+      (ind_ctors d0) fss /\
+    d = with_elim d0 (elim_class_of (ind_sort d0) fss) /\
+    sig_entries sg' = EInd d :: sig_entries sg.
 
 Theorem declaration_sound_holds : declaration_sound.
 Proof. intros S fuel. apply declare_ind_sound. Qed.
 
-(** A registered instance has a type that is a type; both sides of every
-    generated ι-rule check against its type, in its well-formed context, in
-    the signature where the instance has no active rules; and only then is
+(** A registered instance eliminates into a sort the category of D
+    allows and has a type that is a type; both sides of every generated
+    ι-rule check against its type, in its well-formed context, in the
+    signature where the instance has no active rules; and only then is
     the instance added, with active rules. *)
 Definition instance_sound : Prop :=
-  forall S fuel sg D j log log' sg',
-  declare_elim S fuel sg D j log = (log', Ok sg') ->
+  forall S fuel sg D s log log' sg',
+  declare_elim S fuel sg D s log = (log', Ok sg') ->
   exists d,
-    sig_ind sg D = Some d /\ sig_elim sg D j = None /\
-    (exists s, is_type_of S sg [] (elim_type d j) s) /\
+    sig_ind sg D = Some d /\ sig_elim sg D s = None /\
+    allows_elimination S (ind_elim d) s = true /\
+    (exists s', is_type_of S sg [] (elim_type d s) s') /\
     (exists tmp,
-       sig_entries tmp = EElim D j (elim_type d j) false :: sig_entries sg /\
-       forall r, In r (iota_rules d j) ->
+       sig_entries tmp = EElim D s (elim_type d s) false :: sig_entries sg /\
+       forall r, In r (iota_rules d s) ->
          bwf_ctx S tmp (rule_ctx r) /\ btype S tmp (rule_ctx r) (rule_type r) /\
          chk S tmp (rule_ctx r) (rule_lhs r) (rule_type r) /\
          chk S tmp (rule_ctx r) (rule_rhs r) (rule_type r)) /\
-    sig_entries sg' = EElim D j (elim_type d j) true :: sig_entries sg.
+    sig_entries sg' = EElim D s (elim_type d s) true :: sig_entries sg.
 
 Theorem instance_sound_holds : instance_sound.
 Proof. intros S fuel. apply declare_elim_sound. Qed.
@@ -142,11 +159,13 @@ Proof. intros S fuel. apply define_sound. Qed.
 
     Stated, not proved.  Every registration checks its own output (the
     contracts above); these are the general theorems behind those checks,
-    for all declarations, levels and signatures built by registrations,
+    for all declarations, sorts and signatures built by registrations,
     and the metatheory the kernel's declarative obligations need from
-    them.  The bypass mode is outside: its signatures pass every check,
-    yet [δ (mk δ) : Void] holds there (Data.Positivity), so they are
-    neither normalizing nor consistent. *)
+    them.  The bypass modes are outside: without positivity, signatures
+    pass every check, yet [δ (mk δ) : Void] holds there
+    (Data.Positivity), so they are neither normalizing nor consistent;
+    without the check of the sorts of elimination, a proof decides data
+    (Data.Logic), which the erasure of proofs could not keep. *)
 
 (** Every declaration of the grammar is accepted.  A description is well
     formed when no part of it mentions D, every term is closed in its
@@ -166,7 +185,7 @@ Definition desc_well_formed (d : ind_desc) : Prop :=
 
 Definition raw_of (d : ind_desc) : raw_decl := {|
   rd_name := ind_name d; rd_params := ind_params d; rd_indices := ind_indices d;
-  rd_level := ind_level d;
+  rd_sort := ind_sort d;
   rd_ctors := map (fun c =>
     mk_raw_ctor (ctor_name c)
       (pis (field_types (ind_name d) (length (ind_params d)) 0 (ctor_fields c))
@@ -174,24 +193,29 @@ Definition raw_of (d : ind_desc) : raw_decl := {|
                  (vars (length (ctor_fields c)) (length (ind_params d)) ++ ctor_indices c))))
     (ind_ctors d) |}.
 
+(** Classification gives D the category of its sort, which the
+    registration refines. *)
 Definition classification_complete : Prop :=
-  forall d, desc_well_formed d -> classify_decl (raw_of d) = Ok d.
+  forall d, desc_well_formed d -> classify_decl (raw_of d) = Ok (with_elim d (sort_class (ind_sort d))).
 
 (** The general theorem behind the checks of [declare_elim], for every
-    accepted declaration and every level [j]: in the signature with D and
-    the instance without active rules, the type of the instance is a type,
-    every context of a rule is well formed, and both sides of every
-    generated ι-rule have its type, in the declarative rules. *)
+    accepted declaration and every sort [s] of the table, allowed by the
+    category of D or not: in the signature with D and the instance
+    without active rules, the type of the instance is a type, every
+    context of a rule is well formed, and both sides of every generated
+    ι-rule have its type, in the declarative rules.  The category
+    restricts elimination for erasure, not for typing. *)
 Definition generated_instances_typed : Prop :=
-  forall fuel sg raw log log' sg' d j tmp,
-  signature_typed predicative sg ->
-  declare_ind predicative fuel sg raw log = (log', Ok (sg', d)) ->
-  sig_entries tmp = EElim (ind_name d) j (elim_type d j) false :: sig_entries sg' ->
-  (exists s, has_type predicative tmp [] (elim_type d j) (Srt s)) /\
-  forall r, In r (iota_rules d j) ->
-    wf_ctx predicative tmp (rule_ctx r) /\
-    has_type predicative tmp (rule_ctx r) (rule_lhs r) (rule_type r) /\
-    has_type predicative tmp (rule_ctx r) (rule_rhs r) (rule_type r).
+  forall fuel sg raw log log' sg' d s tmp,
+  signature_typed Sp sg ->
+  declare_ind Sp fuel sg raw log = (log', Ok (sg', d)) ->
+  spec_sort Sp s = true ->
+  sig_entries tmp = EElim (ind_name d) s (elim_type d s) false :: sig_entries sg' ->
+  (exists s', has_type Sp tmp [] (elim_type d s) (Srt s')) /\
+  forall r, In r (iota_rules d s) ->
+    wf_ctx Sp tmp (rule_ctx r) /\
+    has_type Sp tmp (rule_ctx r) (rule_lhs r) (rule_type r) /\
+    has_type Sp tmp (rule_ctx r) (rule_rhs r) (rule_type r).
 
 (** The signatures that registrations build from the empty one.  A
     compilation registers its history, the instances it needs and the
@@ -201,67 +225,74 @@ Definition generated_instances_typed : Prop :=
 Inductive built : signature -> Prop :=
 | BuiltEmpty : built ∅
 | BuiltInd : forall fuel sg raw log log' sg' d,
-    built sg -> declare_ind predicative fuel sg raw log = (log', Ok (sg', d)) -> built sg'
-| BuiltElim : forall fuel sg D j log log' sg',
-    built sg -> declare_elim predicative fuel sg D j log = (log', Ok sg') -> built sg'
+    built sg -> declare_ind Sp fuel sg raw log = (log', Ok (sg', d)) -> built sg'
+| BuiltElim : forall fuel sg D s log log' sg',
+    built sg -> declare_elim Sp fuel sg D s log = (log', Ok sg') -> built sg'
 | BuiltDef : forall fuel sg f A b log log' sg',
-    built sg -> define predicative fuel sg f A b log = (log', Ok sg') -> built sg'
+    built sg -> define Sp fuel sg f A b log = (log', Ok sg') -> built sg'
 | BuiltCompile : forall fuel sg fn log log' sg',
-    built sg -> compile predicative fuel sg fn log = (log', Ok sg') -> built sg'.
+    built sg -> compile Sp fuel sg fn log = (log', Ok sg') -> built sg'.
 
 (** The same in the annotated kernel, for a declaration of a built
     signature: the judgments that [declare_elim] checks, those of
-    [instance_sound], for every level, without a registration that
-    succeeded.  The generator annotates what the checker cannot infer. *)
+    [instance_sound], for every sort of the table, without a registration
+    that succeeded.  The generator annotates what the checker cannot
+    infer. *)
 Definition generated_instances_checked : Prop :=
-  forall fuel sg raw log log' sg' d j tmp,
+  forall fuel sg raw log log' sg' d s tmp,
   built sg ->
-  declare_ind predicative fuel sg raw log = (log', Ok (sg', d)) ->
-  sig_entries tmp = EElim (ind_name d) j (elim_type d j) false :: sig_entries sg' ->
-  (exists s, is_type_of predicative sg' [] (elim_type d j) s) /\
-  forall r, In r (iota_rules d j) ->
-    bwf_ctx predicative tmp (rule_ctx r) /\ btype predicative tmp (rule_ctx r) (rule_type r) /\
-    chk predicative tmp (rule_ctx r) (rule_lhs r) (rule_type r) /\
-    chk predicative tmp (rule_ctx r) (rule_rhs r) (rule_type r).
+  declare_ind Sp fuel sg raw log = (log', Ok (sg', d)) ->
+  spec_sort Sp s = true ->
+  sig_entries tmp = EElim (ind_name d) s (elim_type d s) false :: sig_entries sg' ->
+  (exists s', is_type_of Sp sg' [] (elim_type d s) s') /\
+  forall r, In r (iota_rules d s) ->
+    bwf_ctx Sp tmp (rule_ctx r) /\ btype Sp tmp (rule_ctx r) (rule_type r) /\
+    chk Sp tmp (rule_ctx r) (rule_lhs r) (rule_type r) /\
+    chk Sp tmp (rule_ctx r) (rule_rhs r) (rule_type r).
 
 (** The checks of an instance pass: for a declaration in a built signature,
-    with enough fuel the registration of its instance at any level
-    succeeds.  It rests on [generated_instances_checked], not on the
-    declarative [generated_instances_typed], on the normalization below
-    and on the completeness of the kernel's checker and conversion. *)
+    with enough fuel the registration of its instance into any sort its
+    category allows succeeds.  It rests on [generated_instances_checked],
+    not on the declarative [generated_instances_typed], on the
+    normalization below and on the completeness of the kernel's checker
+    and conversion. *)
 Definition instances_registrable : Prop :=
-  forall sg D d j, built sg -> sig_ind sg D = Some d -> sig_elim sg D j = None ->
-  exists n, forall m, n <= m -> exists log sg', declare_elim predicative m sg D j [] = (log, Ok sg').
+  forall sg D d s, built sg -> sig_ind sg D = Some d -> sig_elim sg D s = None ->
+  allows_elimination Sp (ind_elim d) s = true ->
+  exists n, forall m, n <= m -> exists log sg', declare_elim Sp m sg D s [] = (log, Ok sg').
 
 (** Built signatures are type-correct: the premise of the kernel's
     [progress] and [bidir_declarative_sound]. *)
 Definition registrations_typed : Prop :=
-  forall sg, built sg -> signature_typed predicative sg.
+  forall sg, built sg -> signature_typed Sp sg.
 
 (** Built signatures are normalizing: the extended theory of the lecture,
     MLTT with strictly positive inductive families and δ-constants. *)
 Definition registrations_normalizing : Prop :=
-  forall sg, built sg -> normalizing_types predicative sg.
+  forall sg, built sg -> normalizing_types Sp sg.
 
 (** And consistent: no closed term has type Void.  Strict positivity is
     what the bypass gives up. *)
 Definition registrations_consistent : Prop :=
-  forall sg t, built sg -> ~ has_type predicative sg [] t Void.
+  forall sg t, built sg -> ~ has_type Sp sg [] t Void.
 
 (** ** The history (algorithm 2) *)
 
 (** Whatever the registration of the history returns: it was there
     already, or over a signature extending the given one (by [Unit_ℓ] and
     the instances it needs) [Below_D], [build_D] and [recBelow_D] are
-    δ-constants, each checked in the signature before it. *)
+    δ-constants, each checked in the signature before it, at a level ℓ
+    that is [max i j] for [D : Type_i] and, for a proposition, bounds j
+    and the domains of its recursive fields. *)
 Definition history_sound : Prop :=
   forall S fuel sg D j log log' sg',
   ensure_below S fuel sg D j log = (log', Ok sg') ->
   sg' = sg \/
-  exists d sg3 sg4 sg5,
-    sig_ind sg D = Some d /\ (exists es, sig_entries sg3 = es ++ sig_entries sg) /\
-    defined S sg3 (below_name D j) (below_type d j) (below_body d j) sg4 /\
-    defined S sg4 (build_name D j) (build_type d j) (build_body d j) sg5 /\
+  exists d l sg3 sg4 sg5,
+    sig_ind sg D = Some d /\ history_level_spec S sg d j l /\
+    (exists es, sig_entries sg3 = es ++ sig_entries sg) /\
+    defined S sg3 (below_name D j) (below_type d j l) (below_body d l) sg4 /\
+    defined S sg4 (build_name D j) (build_type d j) (build_body d j l) sg5 /\
     defined S sg5 (recbelow_name D j) (recbelow_type d j) (recbelow_body d j) sg'.
 
 Theorem history_sound_holds : history_sound.
@@ -303,76 +334,82 @@ Proof. intros S fuel. apply compile_sound. Qed.
     name defined by hand would be taken for it.  The obligations assume
     that the constants named as a history are the generated ones. *)
 
-(** What the history at the level ℓ = max i j needs: D, [Unit_ℓ] (the
-    primitive Unit at 0), and [elim_D[ℓ+1]] and [elim_D[ℓ]] with active
-    rules. *)
-Definition history_ready (sg : signature) (d : ind_desc) (j : nat) : Prop :=
-  let l := history_level d j in
-  sig_ind sg (ind_name d) = Some d /\
+(** What the history at a level ℓ needs: D, ℓ at least j and the levels
+    of the domains of the recursive fields of D ([history_bounds]),
+    [Unit_ℓ] (the primitive Unit at 0), and [elim_D[ℓ+1]] and [elim_D[ℓ]]
+    with active rules.  The level [history_level] takes is such an ℓ: for
+    a proposition by its checks, for [D : Type_i] by [within]. *)
+Definition history_ready (sg : signature) (d : ind_desc) (j l : nat) : Prop :=
+  sig_ind sg (ind_name d) = Some d /\ history_bounds Sp sg d j l /\
   (l = 0 \/ exists u, classify_decl (unit_decl l) = Ok u /\ sig_ind sg (unit_name l) = Some u) /\
-  sig_elim sg (ind_name d) (S l) = Some (elim_type d (S l), true) /\
-  sig_elim sg (ind_name d) l = Some (elim_type d l, true).
+  sig_elim sg (ind_name d) (Univ (S l)) = Some (elim_type d (Univ (S l)), true) /\
+  sig_elim sg (ind_name d) (Univ l) = Some (elim_type d (Univ l), true).
 
-(** The names the history takes are free; [Unit_ℓ], if declared, is the
+(** The names the history takes are free; every [Unit_ℓ] declared is the
     one the registration declares. *)
 Definition history_names_free (sg : signature) (d : ind_desc) (j : nat) : Prop :=
   let D := ind_name d in
-  let l := history_level d j in
   sig_def sg (below_name D j) = None /\ sig_def sg (build_name D j) = None /\
   sig_def sg (recbelow_name D j) = None /\
-  (sig_ind sg (unit_name l) = None \/
-   exists u, classify_decl (unit_decl l) = Ok u /\ sig_ind sg (unit_name l) = Some u).
+  forall l, sig_ind sg (unit_name l) = None \/
+            exists u, classify_decl (unit_decl l) = Ok u /\ sig_ind sg (unit_name l) = Some u.
 
 (** The general theorem behind the checks of [ensure_below], for every
-    declaration of a built signature and every level whose names are
-    free: [Below_D], then [build_D] with it, then [recBelow_D] with both,
-    have types that are types and bodies of those types, in the
-    declarative rules.  The names are free so that [sg4] and [sg5] add
-    the constructions rather than shadowing constants of [sg]: with
-    [Below_D_0 : Type₀ := Unit] defined by hand and D indexed by it, the
-    generated [Below_D_0] makes the domain of the index a function, and
-    the type of [build_D_0] is no type (Tests.v, [shadow]). *)
+    declaration of a built signature, every motive level j and history
+    level ℓ it is ready for, and free names: [Below_D], then [build_D]
+    with it, then [recBelow_D] with both, have types that are types and
+    bodies of those types, in the declarative rules.  The names are free
+    so that [sg4] and [sg5] add the constructions rather than shadowing
+    constants of [sg]: with [Below_D_0 : Type₀ := Unit] defined by hand
+    and D indexed by it, the generated [Below_D_0] makes the domain of
+    the index a function, and the type of [build_D_0] is no type
+    (Tests.v, [shadow]).  ℓ bounds the domains: at [ℓ := max 0 j] the
+    body of [Below_BigP_0] is refused (Tests.v, [bigp_history]). *)
 Definition history_typed : Prop :=
-  forall sg d j sg4 sg5,
-  built sg -> history_ready sg d j -> history_names_free sg d j ->
-  sig_entries sg4 = EDef (below_name (ind_name d) j) (below_type d j) (below_body d j) :: sig_entries sg ->
-  sig_entries sg5 = EDef (build_name (ind_name d) j) (build_type d j) (build_body d j) :: sig_entries sg4 ->
-  (exists s, has_type predicative sg [] (below_type d j) (Srt s)) /\
-  has_type predicative sg [] (below_body d j) (below_type d j) /\
-  (exists s, has_type predicative sg4 [] (build_type d j) (Srt s)) /\
-  has_type predicative sg4 [] (build_body d j) (build_type d j) /\
-  (exists s, has_type predicative sg5 [] (recbelow_type d j) (Srt s)) /\
-  has_type predicative sg5 [] (recbelow_body d j) (recbelow_type d j).
+  forall sg d j l sg4 sg5,
+  built sg -> history_ready sg d j l -> history_names_free sg d j ->
+  sig_entries sg4 = EDef (below_name (ind_name d) j) (below_type d j l) (below_body d l) :: sig_entries sg ->
+  sig_entries sg5 = EDef (build_name (ind_name d) j) (build_type d j) (build_body d j l) :: sig_entries sg4 ->
+  (exists s, has_type Sp sg [] (below_type d j l) (Srt s)) /\
+  has_type Sp sg [] (below_body d l) (below_type d j l) /\
+  (exists s, has_type Sp sg4 [] (build_type d j) (Srt s)) /\
+  has_type Sp sg4 [] (build_body d j l) (build_type d j) /\
+  (exists s, has_type Sp sg5 [] (recbelow_type d j) (Srt s)) /\
+  has_type Sp sg5 [] (recbelow_body d j) (recbelow_type d j).
 
 (** The same in the annotated kernel: the judgments that [ensure_below]
     checks, those of [history_sound]. *)
 Definition history_checked : Prop :=
-  forall sg d j sg4 sg5,
-  built sg -> history_ready sg d j -> history_names_free sg d j ->
-  sig_entries sg4 = EDef (below_name (ind_name d) j) (below_type d j) (below_body d j) :: sig_entries sg ->
-  sig_entries sg5 = EDef (build_name (ind_name d) j) (build_type d j) (build_body d j) :: sig_entries sg4 ->
-  (exists s, is_type_of predicative sg [] (below_type d j) s) /\
-  chk predicative sg [] (below_body d j) (below_type d j) /\
-  (exists s, is_type_of predicative sg4 [] (build_type d j) s) /\
-  chk predicative sg4 [] (build_body d j) (build_type d j) /\
-  (exists s, is_type_of predicative sg5 [] (recbelow_type d j) s) /\
-  chk predicative sg5 [] (recbelow_body d j) (recbelow_type d j).
+  forall sg d j l sg4 sg5,
+  built sg -> history_ready sg d j l -> history_names_free sg d j ->
+  sig_entries sg4 = EDef (below_name (ind_name d) j) (below_type d j l) (below_body d l) :: sig_entries sg ->
+  sig_entries sg5 = EDef (build_name (ind_name d) j) (build_type d j) (build_body d j l) :: sig_entries sg4 ->
+  (exists s, is_type_of Sp sg [] (below_type d j l) s) /\
+  chk Sp sg [] (below_body d l) (below_type d j l) /\
+  (exists s, is_type_of Sp sg4 [] (build_type d j) s) /\
+  chk Sp sg4 [] (build_body d j l) (build_type d j) /\
+  (exists s, is_type_of Sp sg5 [] (recbelow_type d j) s) /\
+  chk Sp sg5 [] (recbelow_body d j) (recbelow_type d j).
 
 (** The checks of the history pass: for a declaration of a built
-    signature, at any level, with enough fuel its registration succeeds.
-    It rests on [history_checked], [instances_registrable], the
-    normalization of the extended theory and the completeness of the
-    kernel's checker and conversion. *)
+    signature that eliminates into every sort, at any level, with enough
+    fuel its registration succeeds.  A proposition eliminated into Prop
+    only, such as [or], has no instances into Type, and its history is
+    refused with [RElimSort].  It rests on [history_checked],
+    [instances_registrable], the normalization of the extended theory and
+    the completeness of the kernel's checker and conversion. *)
 Definition history_registrable : Prop :=
-  forall sg d j, built sg -> sig_ind sg (ind_name d) = Some d -> history_names_free sg d j ->
-  exists n, forall m, n <= m -> exists log sg', ensure_below predicative m sg (ind_name d) j [] = (log, Ok sg').
+  forall sg d j, built sg -> sig_ind sg (ind_name d) = Some d -> ind_elim d = AllSorts ->
+  history_names_free sg d j ->
+  exists n, forall m, n <= m -> exists log sg', ensure_below Sp m sg (ind_name d) j [] = (log, Ok sg').
 
-(** The constants named as a history are the generated ones. *)
+(** The constants named as a history are the generated ones, at some
+    level. *)
 Definition histories_genuine (sg : signature) : Prop :=
   forall D j A b, sig_def sg (recbelow_name D j) = Some (A, b) ->
-  exists d, sig_ind sg D = Some d /\
-    sig_def sg (below_name D j) = Some (below_type d j, below_body d j) /\
-    sig_def sg (build_name D j) = Some (build_type d j, build_body d j) /\
+  exists d l, sig_ind sg D = Some d /\
+    sig_def sg (below_name D j) = Some (below_type d j l, below_body d l) /\
+    sig_def sg (build_name D j) = Some (build_type d j, build_body d j l) /\
     A = recbelow_type d j /\ b = recbelow_body d j.
 
 (** The leaves of an elaborated tree: the scope, the goal and the right
@@ -395,7 +432,7 @@ Fixpoint leaves (e : elab) : list (scope * term * term) :=
     Among the bodies is [f] itself, under which [f] does not compute. *)
 Definition leaves_typed (sg0 : signature) (f : string) (A : term) (ls : list (scope * term * term)) : Prop :=
   forall sgf b', sig_entries sgf = EDef f A b' :: sig_entries sg0 ->
-  Forall (fun l => let '(G, goal, rhs) := l in has_type predicative sgf (map b_type G) rhs goal) ls.
+  Forall (fun l => let '(G, goal, rhs) := l in has_type Sp sgf (map b_type G) rhs goal) ls.
 
 (** The same in the annotated kernel: every right side checks against
     its goal, whatever the body of [f].  The declarative rules type more:
@@ -404,7 +441,7 @@ Definition leaves_typed (sg0 : signature) (f : string) (A : term) (ls : list (sc
     and refuses the body with [ECannotInfer] whatever the fuel. *)
 Definition leaves_checked (sg0 : signature) (f : string) (A : term) (ls : list (scope * term * term)) : Prop :=
   forall sgf b', sig_entries sgf = EDef f A b' :: sig_entries sg0 ->
-  Forall (fun l => let '(G, goal, rhs) := l in chk predicative sgf (map b_type G) rhs goal) ls.
+  Forall (fun l => let '(G, goal, rhs) := l in chk Sp sgf (map b_type G) rhs goal) ls.
 
 (** The translation keeps types: when the declared type is a type and
     every right side has its goal, the compiled body has the declared
@@ -416,11 +453,11 @@ Definition leaves_checked (sg0 : signature) (f : string) (A : term) (ls : list (
 Definition translation_typed : Prop :=
   forall fuel sg fn log log' sg0 A b ls,
   built sg -> histories_genuine sg ->
-  compile_with predicative fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
+  compile_with Sp fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
   sig_def sg0 (fn_name fn) = None ->
-  (exists s, has_type predicative sg0 [] A (Srt s)) ->
+  (exists s, has_type Sp sg0 [] A (Srt s)) ->
   leaves_typed sg0 (fn_name fn) A ls ->
-  has_type predicative sg0 [] b A.
+  has_type Sp sg0 [] b A.
 
 (** And in the annotated kernel: when the declared type is a type there
     and every right side checks against its goal, the compiled body
@@ -432,11 +469,11 @@ Definition translation_typed : Prop :=
 Definition translation_checked : Prop :=
   forall fuel sg fn log log' sg0 A b ls,
   built sg -> histories_genuine sg ->
-  compile_with predicative fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
+  compile_with Sp fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
   sig_def sg0 (fn_name fn) = None ->
-  (exists s, is_type_of predicative sg0 [] A s) ->
+  (exists s, is_type_of Sp sg0 [] A s) ->
   leaves_checked sg0 (fn_name fn) A ls ->
-  chk predicative sg0 [] b A.
+  chk Sp sg0 [] b A.
 
 (** The defining equations hold by definition, for every tree the
     translation accepts, whatever its right sides: the left side unfolds
@@ -468,10 +505,10 @@ Definition equations_definitional : Prop :=
 Definition compilation_registrable : Prop :=
   forall fuel sg fn log log' sg0 A b ls,
   built sg -> histories_genuine sg -> sig_def sg0 (fn_name fn) = None ->
-  compile_with predicative fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
-  (exists s, is_type_of predicative sg0 [] A s) ->
+  compile_with Sp fuel leaves sg fn log = (log', Ok (sg0, A, b, ls)) ->
+  (exists s, is_type_of Sp sg0 [] A s) ->
   leaves_checked sg0 (fn_name fn) A ls ->
-  exists n, forall m, n <= m -> exists log'' sg', compile predicative m sg fn [] = (log'', Ok sg').
+  exists n, forall m, n <= m -> exists log'' sg', compile Sp m sg fn [] = (log'', Ok sg').
 
 (** Totality: a compiled function is a δ-constant whose body does not
     mention it, so it adds no recursion, and a closed application of it
@@ -480,6 +517,6 @@ Definition compilation_registrable : Prop :=
     types. *)
 Definition compiled_total : Prop :=
   forall fuel sg fn log log' sg' args T,
-  built sg -> compile predicative fuel sg fn log = (log', Ok sg') ->
-  has_type predicative sg' [] (apps (Const (Def (fn_name fn))) args) T ->
+  built sg -> compile Sp fuel sg fn log = (log', Ok sg') ->
+  has_type Sp sg' [] (apps (Const (Def (fn_name fn))) args) T ->
   exists v, clos_refl_trans term (nstep sg') (apps (Const (Def (fn_name fn))) args) v /\ nf sg' v.

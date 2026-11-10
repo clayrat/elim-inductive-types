@@ -20,9 +20,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import Nat Lists.
@@ -70,7 +69,7 @@ Definition len_fn (mk : mark) (A' : nterm) : fun_decl := {|
   fn_struct := "xs"; fn_strategy := History;
   fn_tree := Split "xs" [("nil", [], Leaf zero); ("cons", ["x"; "ys"], Leaf (succ (len A' "ys")))] |}.
 
-Definition sg_list : signature := sg_of (declare_checked predicative 300 sg_direct raw_list [0]).
+Definition sg_list : signature := sg_of (declare_checked predicative 300 sg_direct raw_list [Univ 0]).
 
 Example refusals :
   is_not_structural (refused_by (compile_all predicative prog_fuel sg_direct [pred_fn; g_fn])) &&

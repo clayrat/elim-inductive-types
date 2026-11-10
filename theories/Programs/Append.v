@@ -29,9 +29,8 @@
 From Stdlib Require Import String List Bool.
 Import ListNotations.
 From DepTypes.Common Require Import Result Traced.
-From DepTypes.PTS Require Import Syntax Named Signature Eval Check.
+From DepTypes.PTS Require Import Syntax Named Build Signature Eval Check.
 From DepTypes.Configs Require Import Predicative.
-From DepTypes.SystemU Require Import Looping.
 From DepTypes.MLTT Require Import Constants Families.
 From IndTypes.Elim Require Import Declare.
 From IndTypes.Data Require Import Nat Lists.
@@ -67,7 +66,7 @@ Definition sumv_fn : fun_decl := {|
   fn_tree := Split "v" [("nil", [], Leaf zero);
                         ("cons", ["k"; "x"; "v'"], Leaf (plus "x" (plus (NFst "w") (sumv "k" "v'" (NSnd "w")))))] |}.
 
-Definition sg_vec : signature := sg_of (declare_checked predicative 300 sg_direct raw_vec [0]).
+Definition sg_vec : signature := sg_of (declare_checked predicative 300 sg_direct raw_vec [Univ 0]).
 
 Definition append_run : list (stage * list event) * registration :=
   compile_all predicative prog_fuel sg_vec [append_fn "append" plus; sumv_fn].
@@ -77,8 +76,8 @@ Definition sg_append : signature := sg_of append_run.
 (** The history of vectors, with [elimVec[1]]; then each function. *)
 Example append_stages :
   map fst (fst append_run) =
-  [AtMotive "append" "xs"; AtElimType "Vec" 1; AtRuleLhs "Vec" 1 "nil"; AtRuleRhs "Vec" 1 "nil";
-   AtRuleLhs "Vec" 1 "cons"; AtRuleRhs "Vec" 1 "cons";
+  [AtMotive "append" "xs"; AtElimType "Vec" (Univ 1); AtRuleLhs "Vec" (Univ 1) "nil"; AtRuleRhs "Vec" (Univ 1) "nil";
+   AtRuleLhs "Vec" (Univ 1) "cons"; AtRuleRhs "Vec" (Univ 1) "cons";
    AtDefType "Below_Vec_0"; AtDefBody "Below_Vec_0"; AtDefType "build_Vec_0"; AtDefBody "build_Vec_0";
    AtDefType "recBelow_Vec_0"; AtDefBody "recBelow_Vec_0";
    AtMotive "append" "xs"; AtDefType "append"; AtDefBody "append"; AtEquation "append" 0; AtEquation "append" 1;

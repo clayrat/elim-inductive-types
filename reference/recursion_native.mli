@@ -11,12 +11,18 @@ open Diagnostics_native
 val below_name : string -> int -> string
 val build_name : string -> int -> string
 val recbelow_name : string -> int -> string
-val history_level : ind_desc -> int -> int
 
-val below_type : ind_desc -> int -> term
+(** The level ℓ of the history of D for a motive in [Type_j]: [max i j]
+    for [D : Type_i]; for a proposition, the largest of j and the levels
+    of the domains of its recursive fields, inferred at [AtDomain]. *)
+val history_level : Registration_native.registrar -> signature -> ind_desc -> int -> (int, failure) result
+
+(** For motives in [Type_j] at the history level ℓ: [below_type d j ℓ],
+    [below_body d ℓ], [build_body d j ℓ]. *)
+val below_type : ind_desc -> int -> int -> term
 val below_body : ind_desc -> int -> term
 val build_type : ind_desc -> int -> term
-val build_body : ind_desc -> int -> term
+val build_body : ind_desc -> int -> int -> term
 val recbelow_type : ind_desc -> int -> term
 val recbelow_body : ind_desc -> int -> term
 
@@ -31,12 +37,12 @@ type strategy = Direct | History
 
 (** A leaf is a named right side, a split names its variable and, for
     every constructor, the names of its fields and the subtree. *)
-type case_tree = Leaf of Looping.named | Split of string * (string * string list * case_tree) list
+type case_tree = Leaf of Named.named | Split of string * (string * string list * case_tree) list
 
 type fun_decl = {
   fn_name : string;
-  fn_args : (string * Looping.named * mark) list;   (** outermost first *)
-  fn_result : Looping.named;
+  fn_args : (string * Named.named * mark) list;   (** outermost first *)
+  fn_result : Named.named;
   fn_struct : string;
   fn_strategy : strategy;
   fn_tree : case_tree;
@@ -78,7 +84,7 @@ type elab =
   | ELeaf of { scope : scope; goal : term; env : term list; rhs : term }
   | ESplit of { scope : scope; goal : term; split : split_info; branches : (int * elab) list }
 
-val resolve_in : scope -> Looping.named -> (term, case_error) result
+val resolve_in : scope -> Named.named -> (term, case_error) result
 
 (** [generalize g goal ss extra]: the goal [g ⊢ goal] generalized over the
     seeds [ss], with [extra] in the tail.  As in Rocq it is total: a seed
