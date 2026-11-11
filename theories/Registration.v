@@ -97,8 +97,9 @@ Definition sg_of (r : list (stage * list event) * registration) : signature :=
     PTS.Bidir, by the soundness of the kernel's checker (PTS.CheckSound);
     an entry that is added extends the signature by exactly itself
     ([sig_add_entries] of PTS.Signature).  A δ-constant that is
-    registered is [defined].  Successful runs are split with [tbind_in]
-    and [titer_Forall] of Common.Traced. *)
+    registered is [defined].  A registered answer is a successful run
+    ([registered_run]); successful runs are split with [tbind_in] and
+    [titer_Forall] of Common.Traced. *)
 
 From Stdlib Require Import Relations.
 From DepTypes.PTS Require Import Reduction NormalOrder Bidir CheckSound.
@@ -155,3 +156,13 @@ Section Sound.
     repeat split; [now exists s | exact Hchk | exact H].
   Qed.
 End Sound.
+
+(** The signature a registration answers with is the value of a
+    successful run, whatever its log. *)
+Lemma registered_run : forall (m : R signature) sg', registered (run_registration m) = Some sg' ->
+  exists log, m [] = (log, Ok sg').
+Proof.
+  intros m sg' H. unfold registered, run_registration, run_traced in H.
+  destruct (m []) as [log r] eqn:Em. destruct r as [sg0 | [e | st t]]; cbn in H; try discriminate H.
+  injection H as ->. exists log. reflexivity.
+Qed.

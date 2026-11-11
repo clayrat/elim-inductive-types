@@ -10,7 +10,7 @@
     (Recursion.CaseTree).  The module depends only on the kernel's
     syntax. *)
 
-From Stdlib Require Import List.
+From Stdlib Require Import List Lia.
 Import ListNotations.
 From DepTypes.PTS Require Import Syntax.
 
@@ -37,9 +37,21 @@ Fixpoint upn_ren (m : nat) (r : nat -> nat) : nat -> nat :=
   | S m' => up_ren (upn_ren m' r)
   end.
 
+Lemma upn_ren_lt : forall n r i, i < n -> upn_ren n r i = i.
+Proof.
+  induction n as [|n IH]; intros r i H; [lia | ].
+  destruct i as [|i]; cbn [upn_ren up_ren]; [reflexivity | ]. rewrite IH by lia. reflexivity.
+Qed.
+
+Lemma upn_ren_ge : forall n r j, upn_ren n r (n + j) = n + r j.
+Proof. induction n as [|n IH]; intros r j; [reflexivity | cbn [upn_ren up_ren Nat.add]; rewrite IH; reflexivity]. Qed.
+
 (** Renames a telescope: each entry under the entries before it. *)
 Fixpoint rename_tele (r : nat -> nat) (As : list term) : list term :=
   match As with
   | [] => []
   | A :: As' => rename r A :: rename_tele (up_ren r) As'
   end.
+
+Lemma length_rename_tele : forall As r, length (rename_tele r As) = length As.
+Proof. induction As as [|A As IH]; intros r; cbn; [reflexivity | rewrite IH; reflexivity]. Qed.

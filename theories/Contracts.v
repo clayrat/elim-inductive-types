@@ -16,7 +16,9 @@
     ι-rules, δ-constants, and, for algorithm 2,
     the history [Below_D], [build_D], [recBelow_D] and every compiled
     function: a δ-constant checked against its declared type without
-    itself, its defining equations holding by conversion.
+    itself, its defining equations holding by conversion.  And the
+    signatures that registrations build, compilations included, are
+    type-correct in the declarative rules (Checked/SigTyped.v).
 
     These are checked on every output, through [declare_checked] and
     [compile_checked], as [translate_checked] checks the outputs of the
@@ -40,7 +42,7 @@
     declaratively and in the annotated kernel; its registration succeeds
     with enough fuel when the category allows the sort; and the
     signatures that registrations build, compilations included, are
-    type-correct, normalizing and consistent.  The obligations are stated
+    normalizing and consistent.  The obligations are stated
     for the predicative hierarchy with Prop, [predicative_prop], which
     contains the one without it: the declarations of lecture 7 are among
     its declarations.
@@ -65,6 +67,7 @@ From DepTypes.Configs Require Import Predicative.
 From IndTypes.Elim Require Import Decl Generate Declare.
 From IndTypes.Recursion Require Import Below CaseTree Compile.
 From DepTypes.PTS Require Import Reduction NormalOrder Eval.
+From IndTypes.Checked Require Import Steps Invariants Walk SigTyped.
 From Stdlib Require Import List Relations.
 From Stdlib Require String.
 Import ListNotations.
@@ -157,11 +160,11 @@ Proof. intros S fuel. apply define_sound. Qed.
 
 (** ** Open obligations of algorithm 1
 
-    Stated, not proved.  Every registration checks its own output (the
-    contracts above); these are the general theorems behind those checks,
-    for all declarations, sorts and signatures built by registrations,
-    and the metatheory the kernel's declarative obligations need from
-    them.  The bypass modes are outside: without positivity, signatures
+    Stated, not proved, but for [registrations_typed].  Every
+    registration checks its own output (the contracts above); these are
+    the general theorems behind those checks, for all declarations, sorts
+    and signatures built by registrations, and the metatheory the
+    kernel's declarative obligations need from them.  The bypass modes are outside: without positivity, signatures
     pass every check, yet [δ (mk δ) : Void] holds there
     (Data.Positivity), so they are neither normalizing nor consistent;
     without the check of the sorts of elimination, a proof decides data
@@ -265,6 +268,32 @@ Definition instances_registrable : Prop :=
     [progress] and [bidir_declarative_sound]. *)
 Definition registrations_typed : Prop :=
   forall sg, built sg -> signature_typed Sp sg.
+
+(** Each registration of [built] keeps the invariant [sig_inv] of
+    Checked/SigTyped.v (type-correct entries and bodies, instances whose
+    ι-rules keep types, generated eliminators), and a compilation adds
+    entries only through the other three (Checked/Walk.v). *)
+Theorem registrations_typed_holds : registrations_typed.
+Proof.
+  pose proof declaration_typed_holds as Hdecl.
+  assert (Hi : forall fuel sg raw log log' sg' d, declare_ind Sp fuel sg raw log = (log', Ok (sg', d)) ->
+                 sig_inv sg -> sig_inv sg')
+    by (intros fuel sg raw log log' sg' d H; exact (declare_ind_inv Hdecl _ _ _ _ _ _ _ _ CS_Prop H)).
+  assert (He : forall fuel sg D s log log' sg', declare_elim Sp fuel sg D s log = (log', Ok sg') ->
+                 sig_inv sg -> sig_inv sg')
+    by (intros fuel sg D s log log' sg' H; exact (declare_elim_inv _ _ _ _ _ _ _ _ CS_Prop H)).
+  assert (Hd : forall fuel sg f A b log log' sg', define Sp fuel sg f A b log = (log', Ok sg') ->
+                 sig_inv sg -> sig_inv sg')
+    by (intros fuel sg f A b log log' sg' H; exact (define_inv _ _ _ _ _ _ _ _ _ CS_Prop H)).
+  intros sg H. apply inv_typed.
+  induction H as [ | fuel sg raw log log' sg' d _ IH H | fuel sg D s log log' sg' _ IH H
+                 | fuel sg f A b log log' sg' _ IH H | fuel sg fn log log' sg' _ IH H].
+  - apply inv_empty. reflexivity.
+  - exact (Hi _ _ _ _ _ _ _ H IH).
+  - exact (He _ _ _ _ _ _ _ H IH).
+  - exact (Hd _ _ _ _ _ _ _ _ H IH).
+  - exact (walk_compile Sp fuel sig_inv (Hi fuel) (He fuel) (Hd fuel) _ _ _ _ _ H IH).
+Qed.
 
 (** Built signatures are normalizing: the extended theory of the lecture,
     MLTT with strictly positive inductive families and δ-constants. *)

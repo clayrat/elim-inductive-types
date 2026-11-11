@@ -9,6 +9,7 @@
 # reproduce, and CIC/Match.v, match and fix of the kernel on them (its PCF
 # translation and the strictness-pcf dependency are not built).
 vendor/pts-dependent-types/theories/Common/Result.v
+vendor/pts-dependent-types/theories/Common/Lists.v
 vendor/pts-dependent-types/theories/Common/Traced.v
 vendor/pts-dependent-types/theories/Common/Outcome.v
 vendor/pts-dependent-types/theories/PTS/Syntax.v
@@ -20,13 +21,23 @@ vendor/pts-dependent-types/theories/PTS/Spec.v
 vendor/pts-dependent-types/theories/PTS/Signature.v
 vendor/pts-dependent-types/theories/PTS/Reduction.v
 vendor/pts-dependent-types/theories/PTS/SubstLaws.v
+vendor/pts-dependent-types/theories/PTS/Confluence.v
 vendor/pts-dependent-types/theories/PTS/NormalOrder.v
 vendor/pts-dependent-types/theories/PTS/Eval.v
 vendor/pts-dependent-types/theories/PTS/EvalSrc.v
 vendor/pts-dependent-types/theories/PTS/Guard.v
 vendor/pts-dependent-types/theories/PTS/GuardSound.v
+vendor/pts-dependent-types/theories/PTS/GuardSubst.v
 vendor/pts-dependent-types/theories/PTS/Typing.v
+vendor/pts-dependent-types/theories/PTS/TypingSubst.v
+vendor/pts-dependent-types/theories/PTS/GuardRed.v
+vendor/pts-dependent-types/theories/PTS/Inversion.v
+vendor/pts-dependent-types/theories/PTS/SubjectRed.v
 vendor/pts-dependent-types/theories/PTS/Bidir.v
+vendor/pts-dependent-types/theories/PTS/BidirSound.v
+vendor/pts-dependent-types/theories/PTS/Monotone.v
+vendor/pts-dependent-types/theories/PTS/ConstRename.v
+vendor/pts-dependent-types/theories/PTS/Values.v
 vendor/pts-dependent-types/theories/PTS/Check.v
 vendor/pts-dependent-types/theories/PTS/CheckSound.v
 vendor/pts-dependent-types/theories/Configs/Finite.v
@@ -49,6 +60,13 @@ theories/Elim/Declare.v
 theories/Recursion/Below.v
 theories/Recursion/CaseTree.v
 theories/Recursion/Compile.v
+theories/Checked/Steps.v
+theories/Checked/Walk.v
+theories/Checked/Invariants.v
+theories/Checked/Shaped.v
+theories/Checked/IotaTyped.v
+theories/Checked/SigTyped.v
+theories/Checked/Fields.v
 theories/Data/Sigma.v
 theories/Data/Primitives.v
 theories/Data/Nat.v

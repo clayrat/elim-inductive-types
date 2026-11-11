@@ -49,12 +49,15 @@
     the description is typing the declaration.
     [classify_decl_strictly_positive]: without the bypass, no part of the
     description mentions D, so D occurs in the constructor types exactly as
-    the head of the recursive fields and of the results. *)
+    the head of the recursive fields and of the results.  Beside them, the
+    name of D is the declared one, its constructors have distinct names
+    and its recursive fields as many indices as D ([classify_name],
+    [classify_distinct], [classify_rec]). *)
 
 From Stdlib Require Import List Bool Arith Lia.
 From Stdlib Require String.
 Import ListNotations.
-From DepTypes.Common Require Import Result.
+From DepTypes.Common Require Import Result Lists.
 From DepTypes.PTS Require Import Syntax Signature.
 From IndTypes Require Import Telescope Diagnostics.
 
@@ -308,6 +311,77 @@ Proof.
   injection Hc as <-. split; [reflexivity | ].
   unfold ctor_type. cbn [ind_params ind_name ctor_fields ctor_indices fst snd].
   rewrite pis_app. f_equal. exact (classify_con_rebuilds _ _ _ _ _ _ _ _ _ Hr).
+Qed.
+
+(** ** Names and indices
+
+    The name of D is the declared one, its constructors have distinct
+    names, and, strict positivity checked, every recursive field applies
+    D to as many indices as D has. *)
+
+Corollary classify_name : forall mode raw d, classify_decl_with mode raw = Ok d -> ind_name d = rd_name raw.
+Proof. intros mode raw d H. exact (proj1 (classify_decl_faithful _ _ _ H)). Qed.
+
+Lemma first_duplicate_nodup : forall l, first_duplicate l = None -> NoDup l.
+Proof.
+  induction l as [|x l IH]; intros H; [constructor | ]. cbn [first_duplicate] in H.
+  destruct (existsb (String.eqb x) l) eqn:E; [discriminate H | ].
+  constructor; [ | exact (IH H)].
+  intros Hin. assert (Ex : existsb (String.eqb x) l = true).
+  { apply existsb_exists. exists x. split; [exact Hin | apply String.eqb_refl]. }
+  congruence.
+Qed.
+
+Lemma classify_distinct : forall mode raw d, classify_decl_with mode raw = Ok d ->
+  NoDup (map ctor_name (ind_ctors d)).
+Proof.
+  intros mode raw d H. unfold classify_decl_with in H.
+  apply bind_ok in H as (? & _ & H). apply bind_ok in H as (? & _ & H).
+  apply bind_ok in H as (? & _ & H). apply bind_ok in H as (cs & _ & H).
+  apply bind_ok in H as (u & Hu & H). injection H as <-. cbn [ind_ctors].
+  apply first_duplicate_nodup. destruct (first_duplicate (map ctor_name cs)); [discriminate Hu | reflexivity].
+Qed.
+
+Lemma family_args_length : forall D p q c s k t us, family_args D p q c s k t = Ok us -> length us = q.
+Proof.
+  intros D p q c s k t us H. unfold family_args in H.
+  apply bind_ok in H as (u1 & H1 & H). apply bind_ok in H as (u2 & _ & H). apply bind_ok in H as (u3 & _ & H).
+  injection H as <-. unfold require in H1.
+  destruct (Nat.eqb (length (spine_args t)) (p + q)) eqn:E; [ | discriminate H1].
+  apply Nat.eqb_eq in E. rewrite length_skipn. lia.
+Qed.
+
+Lemma classify_field_rec : forall D p q c l A fd, classify_field D p q Checked c l A = Ok fd ->
+  forall Bs vs, fd = FRec Bs vs -> length vs = q.
+Proof.
+  intros D p q c l A fd H Bs vs ->. unfold classify_field in H.
+  destruct (free_of D A); [discriminate H | ].
+  destruct (split_pis A) as [Bs0 H0].
+  destruct (forallb (free_of D) Bs0 && family_spine D H0); [ | discriminate H].
+  apply bind_ok in H as (vs0 & Hv & H). injection H as <- <-. exact (family_args_length _ _ _ _ _ _ _ _ Hv).
+Qed.
+
+Lemma classify_con_rec : forall D p q c t l fs us, classify_con D p q Checked c l t = Ok (fs, us) ->
+  forall Bs vs, In (FRec Bs vs) fs -> length vs = q.
+Proof.
+  intros D p q c t. induction t; intros l0 fs us H Bs vs Hin; cbn [classify_con] in H.
+  all: first
+    [ apply bind_ok in H as (fd & Hf & H); apply bind_ok in H as ([fs' us'] & Hr & H);
+      injection H as <- <-; destruct Hin as [-> | Hin];
+      [exact (classify_field_rec _ _ _ _ _ _ _ Hf _ _ eq_refl) | exact (IHt2 _ _ _ Hr _ _ Hin)]
+    | apply bind_ok in H as (u & _ & H); apply bind_ok in H as (vs' & _ & H); injection H as <- <-; destruct Hin ].
+Qed.
+
+Lemma classify_rec : forall raw d, classify_decl_with Checked raw = Ok d ->
+  forall c Bs vs, In c (ind_ctors d) -> In (FRec Bs vs) (ctor_fields c) -> length vs = length (ind_indices d).
+Proof.
+  intros raw d H c Bs vs Hc Hin. unfold classify_decl_with in H.
+  apply bind_ok in H as (u1 & _ & H). apply bind_ok in H as (u2 & _ & H). apply bind_ok in H as (u3 & _ & H).
+  apply bind_ok in H as (cs & Hcs & H). apply bind_ok in H as (u4 & _ & H). injection H as <-.
+  cbn [ind_ctors ind_indices] in *. apply mapM_Forall2 in Hcs.
+  destruct (forall2_in_r _ _ _ _ Hcs Hc) as (rc & _ & Hrc). unfold classify_ctor in Hrc.
+  apply bind_ok in Hrc as (u5 & _ & Hrc). apply bind_ok in Hrc as ([fs us] & Hr & Hrc). injection Hrc as <-.
+  cbn [ctor_fields fst] in Hin. exact (classify_con_rec _ _ _ _ _ _ _ _ Hr _ _ Hin).
 Qed.
 
 (** ** Strict positivity *)
